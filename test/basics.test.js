@@ -37,7 +37,7 @@ describe('verify that action-walk works as expected', function () {
 
   it('should match du -ab output', function () {
     const own = {total: 0};
-    const options = {dirAction, fileAction, own, stat: true};
+    const options = {dirAction, fileAction, otherAction, own, stat: true};
     return walk(testdir, options)
       .then(() => {
         expect(own.total + testdirStat.size).equal(duOutput.w_node[testdir]);
@@ -53,6 +53,18 @@ describe('verify that action-walk works as expected', function () {
       })
   });
 
+  it('should execute recursively matching du -b', function () {
+    const own = {total: 0, dirTotals: {}, skipDirs: []};
+    const options = {dirAction: daDirOnly, fileAction, otherAction, own, stat: true};
+    return walk(testdir, options)
+      .then(() => {
+        expect(own.total + testdirStat.size).equal(duOutput.w_node[testdir]);
+        for (const dir in own.dirTotals) {
+          expect(own.dirTotals[dir]).equal(duOutput.w_node[`./${dir}`]);
+        }
+      });
+  });
+
   it('should execute recursively matching du -b --exclude=node_modules', function () {
     const own = {total: 0, dirTotals: {}, skipDirs: ['node_modules']};
     const options = {dirAction: daDirOnly, fileAction, own, stat: true};
@@ -64,19 +76,6 @@ describe('verify that action-walk works as expected', function () {
         }
       });
   });
-
-  it('should execute recursively matching du -b', function () {
-    const own = {total: 0, dirTotals: {}, skipDirs: []};
-    const options = {dirAction: daDirOnly, fileAction, own, stat: true};
-    return walk(testdir, options)
-      .then(() => {
-        expect(own.total + testdirStat.size).equal(duOutput.w_node[testdir]);
-        for (const dir in own.dirTotals) {
-          expect(own.dirTotals[dir]).equal(duOutput.w_node[`./${dir}`]);
-        }
-      });
-  });
-
 
 });
 
@@ -94,6 +93,12 @@ function dirAction (path, ctx) {
 function fileAction (path, ctx) {
   const {stat, own} = ctx;
   own.total += stat.size;
+}
+
+function otherAction (path, ctx) {
+  if (ctx.dirent.isSymbolicLink) {
+    console.log('oops, symbolic link:', path);
+  }
 }
 
 async function daDirOnly (path, ctx) {
