@@ -1,5 +1,7 @@
 # action-walk
 
+[![Build Status](https://travis-ci.org/bmacnaughton/action-walk.svg?branch=master)](https://travis-ci.org/bmacnaughton/action-walk)
+
 Minimal utility to walk directory trees performing actions on each directory
 entry. `action-walk` has no production dependencies other than
 node core modules and has only one strong opinion - don't presume anything
