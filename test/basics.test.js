@@ -15,6 +15,8 @@ const findOutput = {
 }
 
 describe('verify that action-walk works as expected', function () {
+  this.timeout(10000);
+
   // tests need to account for du counting the target directory itself
   // while walk treats that as a starting point and only counts the
   // contents of the directory.
