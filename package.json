@@ -7,7 +7,8 @@
     "test": "test"
   },
   "scripts": {
-    "test": "mocha test/*.test.js"
+    "test": "mocha test/*.test.js",
+    "coverage": "nyc --reporter=text mocha test/*.test.js"
   },
   "keywords": [
     "directory",
@@ -22,13 +23,13 @@
   ],
   "author": "Bruce A. MacNaughton",
   "license": "ISC",
-  "dependencies": {
-  },
+  "dependencies": {},
   "bin": {
     "action-walk": "bin/walk"
   },
   "devDependencies": {
     "mocha": "^8.1.3",
-    "chai": "^4.2.0"
+    "chai": "^4.2.0",
+    "nyc": "^15.1.0"
   }
 }
