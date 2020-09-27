@@ -3,7 +3,8 @@
 Minimal utility to walk directory trees performing actions on each directory
 entry. `action-walk` has no production dependencies other than
 node core modules and has only one strong opinion - don't presume anything
-about why the directory tree is being walked.
+about why the directory tree is being walked. Oh, and another strong opinion -
+running node v12.12.0+.
 
 No presumptions means that this does little more than walk the tree. There
 are two options to facilitate implementing your code on top of `action-walk`.
