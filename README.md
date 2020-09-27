@@ -57,26 +57,27 @@ see `test/basics.test.js` for another example.
 
 options
 - `dirAction` - called for each directory.
-- `fileAction` - called for each file.
-- `otherAction` - called for non-file, non-directory entries.
-- `stat` - call `fs.stat` on the entry and add it to the action context.
-- `own` - add this to the action context.
+- `fileAction` - called for each file and, if `options.linkAction` is not set, each symbolic link.
+- `linkAction` - called for each symbolic link when `options.linkAction` is set.
+- `otherAction` - called when the entry is not a file, directory, or symbolic link.
+- `stat` - if `lstat` call `fs.lstat` on the entry and add it to the action context. if
+otherwise truthy use `fs.stat`.
+- `own` - add this to the action context. it is context for the action functions.
 
 It's possible to call `walk()` with no options but probably not useful unless
 all you're wanting to do is seed the disk cache with directory entries. The
 action functions are where task-specific work is done.
 
-Each of the action function (`dirAction`, `fileAction`, `otherAction`) is
+Each of the action function (`dirAction`, `fileAction`, `linkAction`, `otherAction`) is
 called with two arguments:
-- `filepath` for the entry starting with the `directory`, e.g., if
+- `filepath` for the entry starting with `directory`, e.g., if
 `directory` is `test` and the entry is `basics.test.js` then `filepath`
-will be `test/basics.test.js`. (It is created using node's `path.join` so
-note that if `directory` is `.` it will *not* be present in `filepath`.)
+will be `test/basics.test.js`.
 - `context` is an object as follows.
 ```
 {
   dirent, // the fs.Dirent object for the directory entry
-  stat,   // if `options.stat` the object returned by `fs.stat`
+  stat,   // if `options.stat` the object returned by `fs.stat` or `fs.lstat`
   own     // `options.own` if provided.
 }
 ```
@@ -91,4 +92,3 @@ asynchronous work but only the value of `dirAction` is meaningful.
 ### todo
 
 - add error handling
-- let otherAction return indicator that a symbolic link should be followed.

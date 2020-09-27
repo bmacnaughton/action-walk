@@ -1,4 +1,5 @@
 const fsp = require('fs').promises;
+const p = require('path');
 const {execCommandLine} = require('./utilities/exec');
 const walk = require('../action-walk');
 const {expect} = require('chai');
@@ -8,6 +9,9 @@ let testdirStat;
 const duOutput = {
   wo_node: {},
   w_node: {},
+}
+const findOutput = {
+  links: new Map(),
 }
 
 describe('verify that action-walk works as expected', function () {
@@ -20,59 +24,162 @@ describe('verify that action-walk works as expected', function () {
         testdirStat = s;
       });
   })
-  before(function getDuOutput () {
+  before(function getTargetSizes () {
     // output is size-in-bytes <tab> path-starting-with-dir-name
     const p = [
       execCommandLine(`du -ab --exclude=node_modules ${testdir}`),
       execCommandLine(`du -ab ${testdir}`),
+      // exclude the directory itself, as action-walk does.
+      execCommandLine(`find ${testdir} -type d -mindepth 1 -exec stat --printf %s {} ';' -exec echo " "{} ';'`),
+      execCommandLine(`find ${testdir} -type f -exec stat --printf %s {} ';' -exec echo " "{} ';'`),
     ];
     return Promise.all(p)
       .then(r => {
-        expect(r[0].stderr).equal('');
-        expect(r[1].stderr).equal('');
-        duOutput.wo_node = parseDuOutput(r[0].stdout);
-        duOutput.w_node = parseDuOutput(r[1].stdout);
+        for (const result of r) {
+          expect(result).property('stderr', '');
+        }
+        duOutput.wo_node = parseSizeSpacePath(r[0].stdout);
+        duOutput.w_node = parseSizeSpacePath(r[1].stdout);
+        findOutput.directories = parseSizeSpacePath(r[2].stdout);
+        findOutput.files = parseSizeSpacePath(r[3].stdout);
+      });
+  });
+  before(function getTargetLinks () {
+    return execCommandLine(`find ${testdir} -type l -exec readlink -nf {} ';' -exec echo " -> "{} ';'`)
+      // get object {link: target, ...}
+      .then(r => parseLinkArrowTarget(r.stdout))
+      .then(async r => {
+        for (const pair of r) {
+          const link = await (await fsp.lstat(pair.link)).size;
+          const target = await (await fsp.stat(pair.target)).size;
+          findOutput.links.set(`${pair.link} => ${pair.target}`, {link, target});
+        }
+      })
+  });
+
+  it.only('should count the correct number of directories, files, and links', function () {
+    let dirCount = 0;
+    let fileCount = 0;
+    let linkCount = 0;
+    let otherCount = 0;
+    const options = {
+      dirAction: (path, ctx) => dirCount += 1,
+      fileAction: (path, ctx) => fileCount += 1,
+      linkAction: (path, ctx) => linkCount += 1,
+      otherAction: (path, ctx) => otherCount += 1,
+    }
+    const keyCount = prop => Object.keys(findOutput[prop]).length;
+    return walk(testdir, options)
+      .then(() => {
+        expect(dirCount).equal(keyCount('directories'), 'directory counts must match');
+        expect(fileCount).equal(keyCount('files'), 'file counts must match');
+        expect(linkCount).equal(findOutput.links.size, 'link counts must match');
+        expect(otherCount).equal(0, 'there should not be other types of directory entries');
       });
   });
 
-  it('should match du -ab output', function () {
-    const own = {total: 0};
-    const options = {dirAction, fileAction, otherAction, own, stat: true};
+  it.only('du -ab totals should differ by targetsize - linksize using stat', function () {
+    let delta = 0;
+    const options = {
+      dirAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      linkAction: async (path, ctx) => {
+        // because stat reports on the target of the link, not the
+        // link itself, this code will typically calculate too large
+        // a total because links are small. so this test accumulates
+        // the delta difference between the link size and the target
+        // size and corrects the total at the end.
+        const target = await fsp.readlink(path);
+        const key = `${path} => ${p.resolve(p.dirname(path), target)}`;
+        const sizes = findOutput.links.get(key);
+        delta += sizes.target - sizes.link;
+
+        ctx.own.total += ctx.stat.size;
+      },
+      otherAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      own : {total: 0},
+      stat: true
+    };
+
     return walk(testdir, options)
       .then(() => {
-        expect(own.total + testdirStat.size).equal(duOutput.w_node[testdir]);
+        const awTotal = options.own.total;
+        const duTotal = duOutput.w_node[testdir] - testdirStat.size;
+        expect(awTotal - duTotal - delta).equal(0, 'du and action-walk should calculate the same total bytes');
       })
   });
 
-  it('should match du -ab --exclude=node_modules', function () {
-    const own = {total: 0, skipDirs: ['node_modules']};
-    const options = {dirAction, fileAction, own, stat: true};
+  it.only('should match du -ab output using lstat without a linkAction', function () {
+    const options = {
+      dirAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      otherAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      own: {total: 0},
+      stat: 'lstat',
+    };
+
     return walk(testdir, options)
       .then(() => {
-        expect(own.total + testdirStat.size).equal(duOutput.wo_node[testdir]);
+        const awTotal = options.own.total;
+        const duTotal = duOutput.w_node[testdir] - testdirStat.size;
+        expect(awTotal - duTotal).equal(0, 'du and action-walk should calculate the same total bytes');
       })
   });
 
-  it('should execute recursively matching du -b', function () {
-    const own = {total: 0, dirTotals: {}, skipDirs: []};
-    const options = {dirAction: daDirOnly, fileAction, otherAction, own, stat: true};
+  it.only('should match du -ab --exclude=node_modules', function () {
+    const options = {
+      dirAction: (path, {dirent, stat, own}) => {
+        if (own.skipDirs && own.skipDirs.indexOf(dirent.name) >= 0) {
+          return 'skip';
+        }
+        own.total += stat.size;
+      },
+      fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      linkAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      own: {total: 0, skipDirs: ['node_modules']},
+      stat: 'lstat',
+    }
+
+    return walk(testdir, options)
+      .then(() => {
+        const awTotal = options.own.total;
+        const duTotal = duOutput.wo_node[testdir] - testdirStat.size;
+        expect(awTotal - duTotal).equal(0, 'du and action-walk should calculate the same total bytes');
+      })
+  });
+
+  it.only('should execute recursively matching du -b', function () {
+    const own = {total: 0, linkCount: 0, dirTotals: {}, skipDirs: []};
+    const options = {
+      dirAction: daDirOnly,
+      fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      own,
+      stat: 'lstat',
+    };
+
     return walk(testdir, options)
       .then(() => {
         expect(own.total + testdirStat.size).equal(duOutput.w_node[testdir]);
         for (const dir in own.dirTotals) {
-          expect(own.dirTotals[dir]).equal(duOutput.w_node[`./${dir}`]);
+          expect(own.dirTotals[dir]).equal(duOutput.w_node[`${dir}`]);
         }
       });
   });
 
   it('should execute recursively matching du -b --exclude=node_modules', function () {
-    const own = {total: 0, dirTotals: {}, skipDirs: ['node_modules']};
-    const options = {dirAction: daDirOnly, fileAction, own, stat: true};
+    const own = {total: 0, linkCount: 0, dirTotals: {}, skipDirs: ['node_modules']};
+    const options = {
+      dirAction: daDirOnly,
+      fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      own,
+      stat: 'lstat',
+    };
+
     return walk(testdir, options)
       .then(() => {
-        expect(own.total + testdirStat.size).equal(duOutput.wo_node[testdir]);
+        expect(own.total + testdirStat.size).equal(duOutput.w_node[testdir]);
         for (const dir in own.dirTotals) {
-          expect(own.dirTotals[dir]).equal(duOutput.w_node[`./${dir}`]);
+          expect(own.dirTotals[dir]).equal(duOutput.w_node[`${dir}`]);
         }
       });
   });
@@ -83,23 +190,6 @@ describe('verify that action-walk works as expected', function () {
 //
 // utilities
 //
-function dirAction (path, ctx) {
-  const {dirent, stat, own} = ctx;
-  if (own.skipDirs && own.skipDirs.indexOf(dirent.name) >= 0) {
-    return 'skip';
-  }
-  own.total += stat.size;
-}
-function fileAction (path, ctx) {
-  const {stat, own} = ctx;
-  own.total += stat.size;
-}
-
-function otherAction (path, ctx) {
-  if (ctx.dirent.isSymbolicLink) {
-    console.log('oops, symbolic link:', path);
-  }
-}
 
 async function daDirOnly (path, ctx) {
   const {dirent, stat, own} = ctx;
@@ -110,9 +200,9 @@ async function daDirOnly (path, ctx) {
   const newown = {total: 0, dirTotals: own.dirTotals};
   const options = {
     dirAction: daDirOnly,
-    fileAction,
+    fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
     own: newown,
-    stat: true,
+    stat: 'lstat',
   };
   await walk(path, options);
   own.dirTotals[path] = newown.total + stat.size;
@@ -122,10 +212,24 @@ async function daDirOnly (path, ctx) {
   return 'skip';
 }
 
-function parseDuOutput (text) {
+function parseSizeSpacePath (text) {
   const o = {};
-  for (const m of text.matchAll(/(?<size>\d+)\s+(?<path>.+)/g)) {
+  const re = /(?<size>\d+)\s+(?<path>.+)/g;
+  let m;
+  while ((m = re.exec(text))) {
     o[m.groups.path] = +m.groups.size;
   }
+
   return o;
+}
+
+function parseLinkArrowTarget (text) {
+  const r = [];
+  const re = /(?<target>.+)\s+->\s+(?<link>.+)/g;
+  let m;
+  while (m = re.exec(text)) {
+    r.push({link: m.groups.link, target: m.groups.target})
+  }
+
+  return r;
 }

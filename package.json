@@ -1,6 +1,6 @@
 {
   "name": "action-walk",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "walk a directory tree performing actions",
   "main": "action-walk.js",
   "directories": {
@@ -23,6 +23,9 @@
   "author": "Bruce A. MacNaughton",
   "license": "ISC",
   "dependencies": {
+  },
+  "bin": {
+    "action-walk": "bin/walk"
   },
   "devDependencies": {
     "mocha": "^8.1.3",

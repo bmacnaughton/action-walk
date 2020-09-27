@@ -32,7 +32,11 @@ async function walk (dir, options = {}) {
   //
   async function walker (dir) {
     for await (const dirent of await fsp.opendir(dir)) {
-      const entry = path.join(dir, dirent.name);
+      let entry = path.join(dir, dirent.name);
+      // path.join refuses to start a path with '.'
+      if (dir === '.' || dir.startsWith('./')) {
+        entry = './' + entry;
+      }
       const ctx = {dirent};
       if (options.own) {
         ctx.own = options.own;
@@ -45,10 +49,10 @@ async function walk (dir, options = {}) {
       } else if (dirent.isFile()) {
         fileAction && await fileAction(entry, ctx);
       } else if (dirent.isSymbolicLink()) {
-        if (!linkAction) {
-          fileAction && await fileAction(entry, ctx);
+        if (linkAction) {
+          await linkAction(entry, ctx);
         } else {
-          linkAction && await linkAction(entry, ctx);
+          fileAction && await fileAction(entry, ctx);
         }
       } else {
         otherAction && await otherAction(entry, ctx);
