@@ -44,8 +44,10 @@ async function walk (dir, options = {}) {
       if (stat) {
         ctx.stat = await fsp[stat](entry);
       }
-      if (dirent.isDirectory() && await dirAction(entry, ctx) !== 'skip') {
-        await walker(entry);
+      if (dirent.isDirectory()) {
+        if (await dirAction(entry, ctx) !== 'skip') {
+          await walker(entry);
+        }
       } else if (dirent.isFile()) {
         fileAction && await fileAction(entry, ctx);
       } else if (dirent.isSymbolicLink()) {

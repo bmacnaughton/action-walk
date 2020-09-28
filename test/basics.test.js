@@ -2,8 +2,11 @@ const fsp = require('fs').promises;
 const p = require('path');
 const {execCommandLine} = require('./utilities/exec');
 const walk = require('../action-walk');
-const {expect} = require('chai');
+const chai = require('chai');
+const expect = chai.expect;
+chai.use(require('chai-as-promised'));
 
+// calculate expected results using stat, du, and find.
 const testdir = '.';
 let testdirStat;
 const duOutput = {
@@ -59,7 +62,26 @@ describe('verify that action-walk works as expected', function () {
       })
   });
 
-  it.only('should count the correct number of directories, files, and links', function () {
+  it('should work with no arguments other than a directory', function () {
+    return walk('/dev');
+  });
+
+  it('should reject if the argument is not a directory', function () {
+    return expect(walk('./package.json')).eventually.rejected;
+  })
+
+  it('should work with non-file, non-directory, non-link file types', function () {
+    const options = {
+      otherAction: () => options.own.other += 1,
+      own: {other: 0},
+    };
+    return walk('/dev', options)
+      .then(() => {
+        expect(options.own.other).not.equal(0);
+      });
+  });
+
+  it('should count the correct number of directories, files, and links', function () {
     let dirCount = 0;
     let fileCount = 0;
     let linkCount = 0;
@@ -80,7 +102,7 @@ describe('verify that action-walk works as expected', function () {
       });
   });
 
-  it.only('du -ab totals should differ by targetsize - linksize using stat', function () {
+  it('du -ab totals should differ by targetsize - linksize using stat', function () {
     let delta = 0;
     const options = {
       dirAction: (path, ctx) => ctx.own.total += ctx.stat.size,
@@ -111,7 +133,7 @@ describe('verify that action-walk works as expected', function () {
       })
   });
 
-  it.only('should match du -ab output using lstat without a linkAction', function () {
+  it('should match du -ab output using lstat without a linkAction', function () {
     const options = {
       dirAction: (path, ctx) => ctx.own.total += ctx.stat.size,
       fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
@@ -128,7 +150,7 @@ describe('verify that action-walk works as expected', function () {
       })
   });
 
-  it.only('should match du -ab --exclude=node_modules', function () {
+  it('should match du -ab --exclude=node_modules', function () {
     const options = {
       dirAction: (path, {dirent, stat, own}) => {
         if (own.skipDirs && own.skipDirs.indexOf(dirent.name) >= 0) {
@@ -150,10 +172,10 @@ describe('verify that action-walk works as expected', function () {
       })
   });
 
-  it.only('should execute recursively matching du -b', function () {
+  it('should execute recursively matching du -b', function () {
     const own = {total: 0, linkCount: 0, dirTotals: {}, skipDirs: []};
     const options = {
-      dirAction: daDirOnly,
+      dirAction: daDirsOnly,
       fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
       own,
       stat: 'lstat',
@@ -171,7 +193,7 @@ describe('verify that action-walk works as expected', function () {
   it('should execute recursively matching du -b --exclude=node_modules', function () {
     const own = {total: 0, linkCount: 0, dirTotals: {}, skipDirs: ['node_modules']};
     const options = {
-      dirAction: daDirOnly,
+      dirAction: daDirsOnly,
       fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
       own,
       stat: 'lstat',
@@ -179,9 +201,9 @@ describe('verify that action-walk works as expected', function () {
 
     return walk(testdir, options)
       .then(() => {
-        expect(own.total + testdirStat.size).equal(duOutput.w_node[testdir]);
+        expect(own.total + testdirStat.size).equal(duOutput.wo_node[testdir]);
         for (const dir in own.dirTotals) {
-          expect(own.dirTotals[dir]).equal(duOutput.w_node[`${dir}`]);
+          expect(own.dirTotals[dir]).equal(duOutput.wo_node[`${dir}`]);
         }
       });
   });
@@ -193,7 +215,7 @@ describe('verify that action-walk works as expected', function () {
 // utilities
 //
 
-async function daDirOnly (path, ctx) {
+async function daDirsOnly (path, ctx) {
   const {dirent, stat, own} = ctx;
   if (own.skipDirs && own.skipDirs.indexOf(dirent.name) >= 0) {
     return 'skip';
@@ -201,7 +223,7 @@ async function daDirOnly (path, ctx) {
   own.dirTotals[path] = 0;
   const newown = {total: 0, dirTotals: own.dirTotals};
   const options = {
-    dirAction: daDirOnly,
+    dirAction: daDirsOnly,
     fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
     own: newown,
     stat: 'lstat',
