@@ -1,6 +1,6 @@
 {
   "name": "action-walk",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "walk a directory tree performing actions",
   "main": "action-walk.js",
   "engines": {
@@ -35,7 +35,7 @@
   },
   "dependencies": {},
   "bin": {
-    "action-walk": "bin/walk"
+    "action-walk": "bin/walk.js"
   },
   "devDependencies": {
     "chai": "^4.2.0",
