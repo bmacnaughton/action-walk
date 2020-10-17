@@ -3,6 +3,9 @@
   "version": "2.1.0",
   "description": "walk a directory tree performing actions",
   "main": "action-walk.js",
+  "engines": {
+    "node": ">=12.12.0"
+  },
   "directories": {
     "test": "test"
   },
@@ -23,6 +26,13 @@
   ],
   "author": "Bruce A. MacNaughton",
   "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bmacnaughton/action-walk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bmacnaughton/action-walk/issues"
+  },
   "dependencies": {},
   "bin": {
     "action-walk": "bin/walk"
