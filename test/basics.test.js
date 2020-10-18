@@ -70,6 +70,24 @@ describe('verify that action-walk works as expected', function () {
     return expect(walk('./package.json')).eventually.rejected;
   })
 
+  it('the directory stack should be correct', function () {
+    // this test needs to change if the test directory is changed.
+    const expected = [
+      ['test'],               // basics.test.js
+      ['test'],               // fixtures
+      ['test', 'fixtures'],   // fixtures/linked-file.js
+      ['test'],               // utilities
+      ['test', 'utilities']   // utilities/exec.js
+    ];
+    let n = 0;
+    const action = (path, ctx) => expect(ctx.stack).deep.equal(expected[n++]);
+
+    const options = {
+      dirAction: action, fileAction: action, linkAction: action,
+    }
+    return walk(`${testdir}/test`, options);
+  });
+
   it('should work with non-file, non-directory, non-link file types', function () {
     const options = {
       otherAction: () => options.own.other += 1,
