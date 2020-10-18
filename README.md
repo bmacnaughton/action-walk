@@ -44,15 +44,16 @@ const options = {
   stat: true
 };
 
-await walk('.', options);
+walk('.', options)
+  .then(() => {
+    console.log('total bytes in "."', ctx.total);
+  });
 
-console.log('total bytes in "."', ctx.total);
-
-// executed in the await-walk package root it will print something like
+// executed in the action-walk package root it will print something like
 // total bytes in "." 14778
 ```
 
-see `test/basics.test.js` for another example.
+see `test/basics.test.js` or `bin/walk.js` for other examples.
 
 ### api
 
@@ -63,9 +64,9 @@ options
 - `fileAction` - called for each file and, if `options.linkAction` is not set, each symbolic link.
 - `linkAction` - called for each symbolic link when `options.linkAction` is set.
 - `otherAction` - called when the entry is not a file, directory, or symbolic link.
-- `stat` - if `lstat` call `fs.lstat` on the entry and add it to the action context. if
-otherwise truthy use `fs.stat`.
-- `own` - add this to the action context. it is context for the action functions.
+- `stat` - if `'lstat'` call `fs.lstat` on the entry and add it to the action context's `stat`
+property. if otherwise truthy use `fs.stat`.
+- `own` - add this to the action context. it is your context for the action functions.
 
 It's possible to call `walk()` with no options but probably not useful unless
 all you're wanting to do is seed the disk cache with directory entries. The
@@ -81,6 +82,7 @@ will be `test/basics.test.js`.
 {
   dirent, // the fs.Dirent object for the directory entry
   stat,   // if `options.stat` the object returned by `fs.stat` or `fs.lstat`
+  stack,  // the stack of directories above the current dirent item.
   own     // `options.own` if provided.
 }
 ```

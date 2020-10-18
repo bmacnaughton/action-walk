@@ -13,6 +13,7 @@ async function walk (dir, options = {}) {
   } else if (options.stat) {
     stat = 'stat';
   }
+  const stack = [];
 
   if (options.fileAction) {
     fileAction = async (filepath, ctx) => options.fileAction(filepath, ctx);
@@ -31,13 +32,14 @@ async function walk (dir, options = {}) {
   // walk through a directory tree calling user functions for each entry.
   //
   async function walker (dir) {
+    stack.push(path.basename(dir));
     for await (const dirent of await fsp.opendir(dir)) {
       let entry = path.join(dir, dirent.name);
       // path.join refuses to start a path with '.'
       if (dir === '.' || dir.startsWith('./')) {
         entry = './' + entry;
       }
-      const ctx = {dirent};
+      const ctx = {dirent, stack};
       if (options.own) {
         ctx.own = options.own;
       }
@@ -60,6 +62,7 @@ async function walk (dir, options = {}) {
         otherAction && await otherAction(entry, ctx);
       }
     }
+    stack.pop();
     return undefined;
   }
 
