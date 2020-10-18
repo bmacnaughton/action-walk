@@ -1,0 +1,5 @@
+test/
+.nyc_output/
+.gitignore
+.travis.yml
+*.tgz
