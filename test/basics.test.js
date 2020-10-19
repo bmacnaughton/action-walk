@@ -71,18 +71,18 @@ describe('verify that action-walk works as expected', function () {
   })
 
   it('the directory stack should be correct', function () {
-    // this test needs to change if the test directory is changed.
-    const expected = [
-      ['test'],               // basics.test.js
-      ['test'],               // fixtures
-      ['test', 'fixtures'],   // fixtures/linked-file.js
-      ['test'],               // utilities
-      ['test', 'utilities']   // utilities/exec.js
-    ];
-    let n = 0;
-    //const action = (path, ctx) => expect(ctx.stack).deep.equal(expected[n++]);
+    // this test needs to change if files are added to or removed from
+    // the test directory.
+    const expected = {
+      'basics.test.js':          ['test'],
+      'fixtures':                ['test'],
+      'fixtures/linked-file.js': ['test', 'fixtures'],
+      'utilities':               ['test'],
+      'utilities/exec.js':       ['test', 'utilities']
+    }
     const action = (path, ctx) => {
-      console.log(ctx.stack, ctx.dirent.name);
+      const p = path.slice(path.indexOf('test/') + 'test/'.length);
+      expect(ctx.stack).deep.equal(expected[p]);
     };
 
     const options = {
