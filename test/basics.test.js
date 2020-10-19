@@ -80,7 +80,10 @@ describe('verify that action-walk works as expected', function () {
       ['test', 'utilities']   // utilities/exec.js
     ];
     let n = 0;
-    const action = (path, ctx) => expect(ctx.stack).deep.equal(expected[n++]);
+    //const action = (path, ctx) => expect(ctx.stack).deep.equal(expected[n++]);
+    const action = (path, ctx) => {
+      console.log(ctx.stack, ctx.dirent.name);
+    };
 
     const options = {
       dirAction: action, fileAction: action, linkAction: action,
