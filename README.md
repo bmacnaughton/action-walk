@@ -1,7 +1,6 @@
 # action-walk
 
 ![commit-test](https://github.com/bmacnaughton/action-walk/workflows/commit-test/badge.svg)
-[![Build Status](https://travis-ci.org/bmacnaughton/action-walk.svg?branch=master)](https://travis-ci.org/bmacnaughton/action-walk)
 
 Minimal utility to walk directory trees performing actions on each directory
 entry. `action-walk` has no production dependencies other than
