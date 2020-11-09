@@ -79,9 +79,11 @@ describe('verify that action-walk works as expected', function () {
       'fixtures/linked-file.js': ['test', 'fixtures'],
       'utilities':               ['test'],
       'utilities/exec.js':       ['test', 'utilities']
-    }
+    };
+    const prefix = 'test/';
+
     const action = (path, ctx) => {
-      const p = path.slice(path.indexOf('test/') + 'test/'.length);
+      const p = path.slice(path.indexOf(prefix) + prefix.length);
       expect(ctx.stack).deep.equal(expected[p]);
     };
 
