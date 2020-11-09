@@ -1,5 +1,4 @@
 name: 'commit-test'
-
 on: [push]
 jobs:
   basic-tests:
