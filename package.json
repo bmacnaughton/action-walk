@@ -1,5 +1,6 @@
 {
-  "name": "action-walk",
+  "name": "@bmacnaughton/action-walk",
+  "access": "public",
   "version": "2.2.0",
   "description": "walk a directory tree performing actions",
   "main": "action-walk.js",
@@ -33,13 +34,13 @@
   "bugs": {
     "url": "https://github.com/bmacnaughton/action-walk/issues"
   },
-  "dependencies": {},
   "bin": {
     "action-walk": "bin/walk.js"
   },
   "devDependencies": {
     "chai": "^4.2.0",
     "chai-as-promised": "^7.1.1",
+    "eslint": "^8.54.0",
     "mocha": "^8.1.3",
     "nyc": "^15.1.0"
   }

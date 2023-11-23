@@ -3,10 +3,10 @@
 ![commit-test](https://github.com/bmacnaughton/action-walk/workflows/commit-test/badge.svg)
 
 Minimal utility to walk directory trees performing actions on each directory
-entry. `action-walk` has no production dependencies other than
-node core modules and has only one strong opinion - don't presume anything
-about why the directory tree is being walked. Oh, and another strong opinion -
-running node v12.12.0+.
+entry. `action-walk` has no external production dependencies and has only one
+strong opinion - don't presume anything about why the directory tree is being
+walked. Oh, and another strong opinion - not supporting node versions prior to
+v12.12.0.
 
 No presumptions means that this does little more than walk the tree. There
 are two options to facilitate implementing your code on top of `action-walk`.
@@ -22,7 +22,11 @@ object.
 ### examples
 
 ```
-const walk = require('action-walk');
+//
+// example to walk the directory tree, skipping node_modules, and
+// totaling the number of bytes in each file.
+//
+const walk = require('@bmacnaughton/action-walk');
 
 function dirAction (path, context) {
   const {dirent, stat, own} = context;
@@ -46,7 +50,7 @@ const options = {
 
 walk('.', options)
   .then(() => {
-    console.log('total bytes in "."', ctx.total);
+    console.log('total bytes in "."', own.total);
   });
 
 // executed in the action-walk package root it will print something like
@@ -60,12 +64,13 @@ see `test/basics.test.js` or `bin/walk.js` for other examples.
 `await walk(directory, options = {})`
 
 options
-- `dirAction` - called for each directory.
+- `dirAction` - called for each directory. If it returns `'skip'`, `action-walk` will not
+recurse into the directory.
 - `fileAction` - called for each file and, if `options.linkAction` is not set, each symbolic link.
 - `linkAction` - called for each symbolic link when `options.linkAction` is set.
 - `otherAction` - called when the entry is not a file, directory, or symbolic link.
-- `stat` - if `'lstat'` call `fs.lstat` on the entry and add it to the action context's `stat`
-property. if otherwise truthy use `fs.stat`.
+- `stat` - if `'lstat'` call `fs.lstat` on the entry and add it to the action context as
+the `stat` property. if otherwise truthy use `fs.stat`.
 - `own` - add this to the action context. it is your context for the action functions.
 
 It's possible to call `walk()` with no options but probably not useful unless
@@ -74,16 +79,15 @@ action functions are where task-specific work is done.
 
 Each of the action function (`dirAction`, `fileAction`, `linkAction`, `otherAction`) is
 called with two arguments:
-- `filepath` for the entry starting with `directory`, e.g., if
-`directory` is `test` and the entry is `basics.test.js` then `filepath`
-will be `test/basics.test.js`.
-- `context` is an object as follows.
+- `filepath` for the entry starting with `directory`, e.g., if `directory` is `test` and
+the entry is `basics.test.js` then `filepath` will be `test/basics.test.js`.
+- `context` is an object:
 ```
 {
   dirent, // the fs.Dirent object for the directory entry
-  stat,   // if `options.stat` the object returned by `fs.stat` or `fs.lstat`
+  stat,   // if `options.stat`, the object returned by `fs.stat` or `fs.lstat`
   stack,  // the stack of directories above the current dirent item.
-  own     // `options.own` if provided.
+  own     // `options.own`, if provided.
 }
 ```
 
