@@ -1,3 +1,5 @@
+'use strict';
+
 const fsp = require('fs').promises;
 const p = require('path');
 const {execCommandLine} = require('./utilities/exec');
@@ -18,38 +20,41 @@ const findOutput = {
 }
 
 describe('verify that action-walk works as expected', function () {
-  this.timeout(10000);
+  // using find to collect all the file and directory sizes is a little
+  // bit slow, so give it a minute.
+  this.timeout(60000);
 
   // tests need to account for du counting the target directory itself
   // while walk treats that as a starting point and only counts the
   // contents of the directory.
-  before(function getTestDirSize () {
+  before(async function getTestDirSize () {
     return fsp.stat(testdir)
       .then(s => {
         testdirStat = s;
+      })
+      .then(() => execCommandLine(`du -ab --exclude=node_modules ${testdir}`))
+      .then(r => {
+        expect(r).property('stderr', '');
+        duOutput.wo_node = parseSizeSpacePath(r.stdout);
+      })
+      .then(() => execCommandLine(`du -ab ${testdir}`))
+      .then(r => {
+        expect(r).property('stderr', '');
+        duOutput.w_node = parseSizeSpacePath(r.stdout);
+      })
+      .then(() => execCommandLine(`find ${testdir} -type d -exec stat --printf %s {} ';' -exec echo " "{} ';'`))
+      .then(r => {
+        expect(r).property('stderr', '');
+        findOutput.directories = parseSizeSpacePath(r.stdout);
+      })
+      .then(() => execCommandLine(`find ${testdir} -type f -exec stat --printf %s {} ';' -exec echo " "{} ';'`))
+      .then(r => {
+        expect(r).property('stderr', '');
+        findOutput.files = parseSizeSpacePath(r.stdout);
       });
   })
-  before(function getTargetSizes () {
-    // output is size-in-bytes <tab> path-starting-with-dir-name
-    const p = [
-      execCommandLine(`du -ab --exclude=node_modules ${testdir}`),
-      execCommandLine(`du -ab ${testdir}`),
-      // exclude the directory itself, as action-walk does.
-      execCommandLine(`find ${testdir} -type d -mindepth 1 -exec stat --printf %s {} ';' -exec echo " "{} ';'`),
-      execCommandLine(`find ${testdir} -type f -exec stat --printf %s {} ';' -exec echo " "{} ';'`),
-    ];
-    return Promise.all(p)
-      .then(r => {
-        for (const result of r) {
-          expect(result).property('stderr', '');
-        }
-        duOutput.wo_node = parseSizeSpacePath(r[0].stdout);
-        duOutput.w_node = parseSizeSpacePath(r[1].stdout);
-        findOutput.directories = parseSizeSpacePath(r[2].stdout);
-        findOutput.files = parseSizeSpacePath(r[3].stdout);
-      });
-  });
-  before(function getTargetLinks () {
+
+  before(async function getTargetLinks () {
     return execCommandLine(`find ${testdir} -type l -exec readlink -nf {} ';' -exec echo " -> "{} ';'`)
       // get object {link: target, ...}
       .then(r => parseLinkArrowTarget(r.stdout))
@@ -62,7 +67,7 @@ describe('verify that action-walk works as expected', function () {
       })
   });
 
-  it('should work with no arguments other than a directory', function () {
+  it('should work with no arguments other than a directory', async function () {
     return walk('/dev');
   });
 
@@ -105,7 +110,7 @@ describe('verify that action-walk works as expected', function () {
   });
 
   it('should count the correct number of directories, files, and links', function () {
-    let dirCount = 0;
+    let dirCount = 1; // the starting directory
     let fileCount = 0;
     let linkCount = 0;
     let otherCount = 0;
