@@ -37,6 +37,7 @@ if (process.env.DRY_RUN === 'true') {
 } else if (process.env.DRY_RUN === 'no-push') {
   DRY_RUN = 'no-push';
 }
+const DEFAULT_BRANCH = 'master';
 
 const semver = require('semver');
 const versionTypes = ['major', 'minor', 'patch'];
@@ -46,11 +47,11 @@ const currentBranch = execSyncStripOneLine('git branch --show-current');
 
 const questions = [
   {
-    // get the branch name to release from; defaults to main.
+    // get the branch name to release from; defaults to DEFAULT_BRANCH.
     name: 'branch',
     message: 'What branch to release (will checkout this branch)?',
     type: 'input',
-    default: 'main',
+    default: DEFAULT_BRANCH,
     // this only validates indirectly, by making sure the current branch is
     // the one specified and fetching any remote updates.
     validate: (branch, hash) => {
