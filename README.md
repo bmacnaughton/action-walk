@@ -101,3 +101,4 @@ asynchronous work but only the value of `dirAction` is meaningful.
 ### todo
 
 - add error handling
+- add windows support
