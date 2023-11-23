@@ -10,9 +10,16 @@
   "directories": {
     "test": "test"
   },
+  "files": [
+    "action-walk.js",
+    "bin/walk.js",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "mocha test/*.test.js",
-    "coverage": "nyc --reporter=text mocha test/*.test.js"
+    "coverage": "nyc --reporter=text mocha test/*.test.js",
+    "walk": "node bin/walk.js"
   },
   "keywords": [
     "directory",
