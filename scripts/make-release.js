@@ -4,7 +4,9 @@
 const util = require('util');
 const cp = require('child_process');
 const fs = require('fs');
+
 const inquirerPromise = import('inquirer');
+const semver = require('semver');
 
 // verify that we're in the correct directory by checking package.json
 let pdj;
@@ -24,10 +26,6 @@ try {
   process.exit(1);
 }
 
-// verify the directory is clean (no uncommitted changes, but allow untracked
-// files).
-verifyCleanDirectory();
-
 const NOISY = process.env.VERBOSE !== 'false' ? console.log : () => null;
 // whether to actually execute the commands or just print them. no-push
 // executes all commands except those that push to github.
@@ -39,7 +37,11 @@ if (process.env.DRY_RUN === 'true') {
 }
 const DEFAULT_BRANCH = 'master';
 
-const semver = require('semver');
+
+// verify the directory is clean (no uncommitted changes, but allow untracked
+// files).
+verifyCleanDirectory();
+
 const versionTypes = ['major', 'minor', 'patch'];
 
 // find out what branch we're on.
@@ -91,7 +93,6 @@ const questions = [
       let defaultIx = versionTypes.indexOf('minor');
       const versions = versionTypes.map(type => {
         const versionChoice = semver.inc(hash.currentVersion, type);
-        hash.newVersion = versionChoice;
         const name = `${type} (v${versionChoice})`;
         return { name, value: versionChoice, short: name };
       });
@@ -102,7 +103,6 @@ const questions = [
       if (preleaseComponents) {
         const prerelease = preleaseComponents[0];
         const versionChoice = semver.inc(hash.currentVersion, 'prerelease');
-        hash.newVersion = versionChoice;
         const name = `pre${prerelease} (v${versionChoice})`;
         versions.push({ name, value: versionChoice, short: name });
         defaultIx = versions.length - 1;
@@ -113,6 +113,16 @@ const questions = [
 
       return defaultIx;
     },
+    // filter is called after the user selects a choice. here we set newVersion
+    // unless it's "custom". the "custom" prompt is conditional and must set
+    // newVersion itself.
+    filter(type, hash) {
+      if (type === 'custom') {
+        return type;
+      }
+      hash.newVersion = type;
+      return type;
+    }
   }, {
     name: 'custom',
     type: 'input',
@@ -252,6 +262,10 @@ function execSyncStripOneLine(cmd, message = '') {
 }
 
 function verifyCleanDirectory() {
+  // if it's a dry-run there is then no need to check.
+  if (DRY_RUN === true) {
+    return;
+  }
   const stdout = cp.execSync('git status --porcelain=v2').toString();
   const lines = stdout.toString().split('\n');
   for (const line of lines) {
