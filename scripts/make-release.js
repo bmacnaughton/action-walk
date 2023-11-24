@@ -187,9 +187,9 @@ inquirerPromise
       // https://stackoverflow.com/questions/75965870/npm-version-command-not-creating-git-tag-when-the-npm-app-is-in-a-sub-folder
       `npm version ${hash.newVersion}`,
       // commit package.json (we verified the directory was clean earlier)
-      `git commit -am "release: v${hash.newVersion}"`,
+      //`git commit -am "release: v${hash.newVersion}"`,
       // tag the commit
-      `git tag v${hash.newVersion} -m "release: v${hash.newVersion}"`,
+      //`git tag v${hash.newVersion} -m "release: v${hash.newVersion}"`,
       // push it to github
       `git push -u origin ${branchName}`,
       // and push the tag too
