@@ -1,7 +1,7 @@
 {
   "name": "@bmacnaughton/action-walk",
   "access": "public",
-  "version": "2.3.0",
+  "version": "2.2.0",
   "description": "walk a directory tree performing actions",
   "main": "action-walk.js",
   "engines": {
