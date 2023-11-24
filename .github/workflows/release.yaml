@@ -3,7 +3,8 @@ on:
     branches:
       # run scripts/make-release to create a release. it handles the versioning,
       # creating the branch, and pushing it to github to trigger this workflow.
-      - main, master
+      - main
+      - master
     types:
       - closed
 
