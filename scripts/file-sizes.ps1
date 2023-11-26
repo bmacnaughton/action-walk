@@ -5,9 +5,9 @@ Get-ChildItem $args[0] -Recurse -force  | ForEach-Object {
     # a directory is always 1 - not a real size, not zero (even
     # though it's zero). powershell is awesome.
     if ($_.psiscontainer) {
-      Write-Host "0 $($_.FullName) True"
+      Write-Host "0 $($_.FullName) d"
     } else {
-      Write-Host "$($_.length) $($_.fullname) False"
+      Write-Host "$($_.length) $($_.fullname) f"
     }
 }
 
