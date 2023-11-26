@@ -36,12 +36,12 @@ describe('verify that action-walk works as expected', function() {
   // while walk treats that as a starting point and only counts the
   // contents of the directory.
   before(async function getTestDirSize() {
-    let getExpectedValues = isWindows ? getExpectedValuesWin : getExpectedValuesUx;
+    let getExpectedValues = isWindows ? getExpectedValuesWinX : getExpectedValuesUx;
     return fsp.stat(testdir)
       .then(s => {
         testdirStat = s;
       })
-      .then(() => getExpectedValues(duOutput, findOutput));
+      .then(() => getExpectedValues(testdir, duOutput, findOutput));
   })
 
   before(async function getTargetLinks() {
@@ -195,7 +195,7 @@ describe('verify that action-walk works as expected', function() {
       .then(() => {
         const awTotal = options.own.total;
         const duTotal = duOutput.wo_node[testdir] - testdirStat.size;
-        expect(awTotal - duTotal).equal(0, 'du and action-walk should calculate the same total bytes');
+        expect(awTotal).equal(duTotal, 'action-walk should calculate the same total bytes as du');
       })
   });
 
@@ -212,7 +212,7 @@ describe('verify that action-walk works as expected', function() {
       .then(() => {
         expect(own.total + testdirStat.size).equal(duOutput.w_node[testdir]);
         for (const dir in own.dirTotals) {
-          expect(own.dirTotals[dir]).equal(duOutput.w_node[`${dir}`]);
+          expect(own.dirTotals[dir]).equal(duOutput.w_node[dir]);
         }
       });
   });
@@ -285,13 +285,137 @@ function parseLinkArrowTarget(text) {
   return r;
 }
 
-async function getExpectedValuesWin(duOutput, findOutput) {
-  let results = cp.spawnSync('.\\scripts\\file-sizes.ps1', ['-nologo'], {shell: 'powershell.exe'});
+const BYTES = Symbol('bytes');
+const TYPE = Symbol('type');
+
+async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot = {}) {
+  const rootDirResolved = p.resolve(rootdir);
+
+  let results = cp.spawnSync('.\\scripts\\file-sizes.ps1', [rootdir], {shell: 'powershell.exe'});
 
   let lines1 = results.stdout.toString();
   let lines2 = lines1.split('\n');
 
-  const re = new RegExp('^(\\d+) ' + process.cwd().replace(/\\/g, '\\\\') + '(.+) (True|False)$');
+  const re = new RegExp('^(\\d+) ' + rootDirResolved.replace(/\\/g, '\\\\') + '(.+) (d|f)$');
+  let count = 0;
+
+  const wo_nodePaths = [];
+  const w_nodePaths = [];
+  const directories = {};
+  const files = {};
+  dirtreeRoot[rootdir] = {[BYTES]: 0, [TYPE]: 'd'};
+
+  let wo_total = 0;
+  let w_total = 0;
+
+
+  // simulate approximately what 'du -ab' does.
+  for (const line of lines2) {
+    const m = line.match(re);
+    if (m) {
+      const bytes = +m[1];
+
+      const fullpath = line.slice(m[1].length + 1, -(m[3].length + 1));
+      // make the start of our paths the rootdir.
+      const relativePath = fullpath.replace(rootDirResolved, rootdir);
+
+      // the path elements as an array, e.g., ['node_modules', '@contrast', ...]
+      const relativePathElements = relativePath.split(p.sep);
+
+      // start at the root each time
+      let treeStack = [dirtreeRoot];
+
+      // aggregate counts for each item in the tree. each tree entry is
+      // an object containing all leaf items and sub-trees. it also keeps
+      // the byte count for all leaf and sub-tree items.
+      //
+      // add each element's size to the predecessor byte counts because all
+      // items in the path contain the element.
+      for (let i = 0; i < relativePathElements.length; i++) {
+        const nextElement = relativePathElements[i];
+
+        // if this is the first time we've seen nextElement, add it to
+        // the previous element. otherwise just add to the byte count.
+        if (!(nextElement in treeStack.at(-1))) {
+          const newItem = {[BYTES]: bytes, [TYPE]: m[3]};
+          treeStack.at(-1)[nextElement] = newItem;
+          treeStack.push(newItem);
+        } else {
+          treeStack.at(-1)[nextElement][BYTES] += bytes;
+          treeStack.push(treeStack.at(-1)[nextElement]);
+        }
+      }
+
+      w_nodePaths.push(relativePath);
+      w_total += bytes;
+
+      // needs a little work, but we're only skipping subdirectories and
+      // they start in the second element.
+      if (!['node_modules'].includes(relativePathElements[1])) {
+        wo_nodePaths.push(relativePath);
+        wo_total += bytes;
+      }
+
+      if (m[3] === 'd') {
+        directories[relativePath] = bytes;
+      } else if (m[3] === 'f') {
+        files[relativePath] = bytes;
+      } else if (m[3] === 'l') {
+        // it's a link...
+      }
+    } else {
+      // don't know how to suppress ps noise. have changed login script and it
+      // is still running old one it seems.
+      //console.log('unexpected line', line);
+    }
+  }
+
+  function walktree(tree) {
+    const branch = [];
+    const results = [];
+
+    function _walktree(tree) {
+      for (const key of Object.keys(tree)) {
+        branch.push(key);
+        _walktree(tree[key], branch);
+        results.push({path: branch.join(p.sep), bytes: tree[key][BYTES], type: tree[key][TYPE]});
+        //console.log(branch.join(p.sep), tree[key][BYTES])
+        branch.pop();
+      }
+    }
+    _walktree(tree);
+
+    return results;
+  }
+
+  const coreInfo = walktree(dirtreeRoot);
+
+  // now insert rootdir totals; the powershell command doesn't report on
+  // the rootdir itself.
+  duOutput.w_node[rootdir] = w_total;
+  duOutput.wo_node[rootdir] = wo_total;
+
+  //duOutput.w_node = {};
+  coreInfo.forEach(info => {
+    duOutput.w_node[info.path] = info.bytes;
+    if (wo_nodePaths.includes(info.path)) {
+      duOutput.wo_node[info.path] = info.bytes;
+    }
+  });
+
+  findOutput.directories = directories;
+  findOutput.files = files;
+
+  return dirtreeRoot;
+}
+
+async function getExpectedValuesWin(rootdir, duOutput, findOutput) {
+  let results = cp.spawnSync('.\\scripts\\file-sizes.ps1', [rootdir], {shell: 'powershell.exe'});
+
+  let lines1 = results.stdout.toString();
+  let lines2 = lines1.split('\n');
+
+  const re = new RegExp('^(\\d+) ' + process.cwd().replace(/\\/g, '\\\\') + '(.+) (d|f)$');
   let count = 0;
 
   const wo_node = {};
@@ -307,20 +431,23 @@ async function getExpectedValuesWin(duOutput, findOutput) {
   for (const line of lines2) {
     const m = line.match(re);
     if (m) {
+      const bytes = m[1];
+      const path = m[2];
+      const isDir = m[3] === 'd';
       const fullpath = line.slice(m[1].length, -m[3].length);
 
       w_node[fullpath] = +m[1];
       w_total += w_node[fullpath];
-      //w_node.push({size: +m[1], name: m[2], directory: m[3] === 'True'});
+      //w_node.push({size: +m[1], name: m[2], directory: m[3] === 'd'});
 
       if (!m[2].startsWith('\\node_modules')) {
         wo_node[fullpath] = +m[1];
         wo_total += wo_node[fullpath];
-        //wo_node.push({size: +m[1], name: m[2], directory: m[3] === 'True'});
+        //wo_node.push({size: +m[1], name: m[2], directory: m[3] === 'd'});
       }
 
 
-      if (m[3] === 'True') {
+      if (m[3] === 'd') {
         directories[fullpath] = +m[1];
       } else {
         files[fullpath] = +m[1];
@@ -341,23 +468,28 @@ async function getExpectedValuesWin(duOutput, findOutput) {
   findOutput.files = files;
 }
 
-async function getExpectedValuesUx(duOutput, findOutput) {
-  return execCommandLine(`du -ab --exclude=node_modules ${testdir}`)
+async function getExpectedValuesUx(rootdir, duOutput, findOutput) {
+  //
+  // `find node_modules/.bin -exec stat --printf "%s %A" {} ';' -exec echo " "{} ';'`
+  // 4096 drwxr-xr-x test
+  // 6644 -rw-r--r-- test/index.test.js
+
+  return execCommandLine(`du -ab --exclude=node_modules ${rootdir}`)
     .then(r => {
       expect(r).property('stderr', '');
       duOutput.wo_node = parseSizeSpacePath(r.stdout);
     })
-    .then(() => execCommandLine(`du -ab ${testdir}`))
+    .then(() => execCommandLine(`du -ab ${rootdir}`))
     .then(r => {
       expect(r).property('stderr', '');
       duOutput.w_node = parseSizeSpacePath(r.stdout);
     })
-    .then(() => execCommandLine(`find ${testdir} -type d -exec stat --printf %s {} ';' -exec echo " "{} ';'`))
+    .then(() => execCommandLine(`find ${rootdir} -type d -exec stat --printf %s {} ';' -exec echo " "{} ';'`))
     .then(r => {
       expect(r).property('stderr', '');
       findOutput.directories = parseSizeSpacePath(r.stdout);
     })
-    .then(() => execCommandLine(`find ${testdir} -type f -exec stat --printf %s {} ';' -exec echo " "{} ';'`))
+    .then(() => execCommandLine(`find ${rootdir} -type f -exec stat --printf %s {} ';' -exec echo " "{} ';'`))
     .then(r => {
       expect(r).property('stderr', '');
       findOutput.files = parseSizeSpacePath(r.stdout);

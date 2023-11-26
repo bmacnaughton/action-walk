@@ -4,8 +4,9 @@ const cp = require('node:child_process');
 const p = require('node:path');
 
 const BYTES = Symbol('bytes');
+const TYPE = Symbol('type');
 
-async function getExpectedValuesWin(rootdir, duOutput, findOutput, dirtreeRoot) {
+async function getExpectedValuesWin(rootdir, duOutput, findOutput, dirtreeRoot = {}) {
   const rootDirResolved = p.resolve(rootdir);
 
   let results = cp.spawnSync('.\\scripts\\file-sizes.ps1', [rootdir], {shell: 'powershell.exe'});
@@ -20,7 +21,7 @@ async function getExpectedValuesWin(rootdir, duOutput, findOutput, dirtreeRoot) 
   const w_node = {};
   const directories = {};
   const files = {};
-  dirtreeRoot[rootdir] = {[BYTES]: 0};
+  dirtreeRoot[rootdir] = {[BYTES]: 0, [TYPE]: 'd'};
 
   let wo_total = 0;
   let w_total = 0;
@@ -55,7 +56,7 @@ async function getExpectedValuesWin(rootdir, duOutput, findOutput, dirtreeRoot) 
         // if this is the first time we've seen nextElement, add it to
         // the previous element. otherwise just add to the byte count.
         if (!(nextElement in treeStack.at(-1))) {
-          const newItem = {[BYTES]: bytes};
+          const newItem = {[BYTES]: bytes, [TYPE]: m[3]};
           treeStack.at(-1)[nextElement] = newItem;
           treeStack.push(newItem);
         } else {
@@ -121,7 +122,7 @@ function walktree(tree) {
     for (const key of Object.keys(tree)) {
       branch.push(key);
       _walktree(tree[key], branch);
-      results.push({path: branch.join(p.sep), bytes: tree[key][BYTES]});
+      results.push({path: branch.join(p.sep), bytes: tree[key][BYTES], type: tree[key][TYPE]});
       //console.log(branch.join(p.sep), tree[key][BYTES])
       branch.pop();
     }
