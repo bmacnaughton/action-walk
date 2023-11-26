@@ -1,6 +1,6 @@
 
 # -force so it gets hidden files, i.e., .git
-Get-ChildItem "." -Recurse -force  | ForEach-Object {
+Get-ChildItem $args[0] -Recurse -force  | ForEach-Object {
     # Do something with the file size. cleverly, $_.length for
     # a directory is always 1 - not a real size, not zero (even
     # though it's zero). powershell is awesome.
