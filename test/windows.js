@@ -395,7 +395,8 @@ async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot 
   duOutput.w_node[rootdir] = w_total;
   duOutput.wo_node[rootdir] = wo_total;
 
-  //duOutput.w_node = {};
+  // w_node gets all the values, wo_node only those that are in
+  // wo_nodesPath.
   coreInfo.forEach(info => {
     duOutput.w_node[info.path] = info.bytes;
     if (wo_nodePaths.includes(info.path)) {
