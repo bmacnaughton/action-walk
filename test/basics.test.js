@@ -85,12 +85,16 @@ describe('verify that action-walk works as expected', function () {
       'fixtures':                ['test'],
       'fixtures/linked-file.js': ['test', 'fixtures'],
       'utilities':               ['test'],
-      'utilities/exec.js':       ['test', 'utilities']
+      'utilities/exec.js':       ['test', 'utilities'],
+      'windows.js':              ['test'],
     };
     const prefix = 'test/';
 
     const action = (path, ctx) => {
       const p = path.slice(path.indexOf(prefix) + prefix.length);
+      if (!expected[p]) {
+        throw new Error(`unexpected path ${p}; consider updating the test`);
+      }
       expect(ctx.stack).deep.equal(expected[p]);
     };
 
