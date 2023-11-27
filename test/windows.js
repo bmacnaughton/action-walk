@@ -25,6 +25,8 @@ const findOutput = {
   links: new Map(),
 }
 
+
+
 // child_process.execSync('.\\scripts\\file-sizes.ps1', {shell: 'powershell.exe'})
 
 describe('verify that action-walk works as expected', function() {
@@ -45,7 +47,6 @@ describe('verify that action-walk works as expected', function() {
   })
 
   before(async function getTargetLinks() {
-    return;
     return execCommandLine(`find ${testdir} -type l -exec readlink -nf {} ';' -exec echo " -> "{} ';'`)
       // get object {link: target, ...}
       .then(r => parseLinkArrowTarget(r.stdout))
@@ -291,6 +292,8 @@ const TYPE = Symbol('type');
 async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot = {}) {
   const rootDirResolved = p.resolve(rootdir);
 
+  // the script outputs lines like: "4096 C:\Users\joe\test\testdir d", where the last
+  // character is 'd' for directory, 'f' for file, and 'l' for link.
   let results = cp.spawnSync('.\\scripts\\file-sizes.ps1', [rootdir], {shell: 'powershell.exe'});
 
   let lines1 = results.stdout.toString();
@@ -350,7 +353,8 @@ async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot 
       w_total += bytes;
 
       // needs a little work, but we're only skipping subdirectories and
-      // they start in the second element.
+      // they start in the second element. ideally skips should be an
+      // array of array of strings.
       if (!['node_modules'].includes(relativePathElements[1])) {
         wo_nodePaths.push(relativePath);
         wo_total += bytes;
@@ -469,11 +473,32 @@ async function getExpectedValuesWin(rootdir, duOutput, findOutput) {
   findOutput.files = files;
 }
 
-async function getExpectedValuesUx(rootdir, duOutput, findOutput) {
-  //
+async function getExpectedValuesUxX(rootdir, duOutput, findOutput, dirtreeRoot = {}) {
+  const re = new RegExp('^(\\d+) (.).{9} ' + '(.+)$');
+
   // `find node_modules/.bin -exec stat --printf "%s %A" {} ';' -exec echo " "{} ';'`
   // 4096 drwxr-xr-x test
   // 6644 -rw-r--r-- test/index.test.js
+  // and we convert to "4096 test d" and "6644 test/index.test.js f" so common processing
+  // with results of the file-sizes.ps1 script.
+  return execCommandLine(`find ${rootdir} -exec stat --printf "%s %A" {} ';' -exec echo " "{} ';'`)
+    .then(r => {
+      expect(r).property('stderr', '');
+      const text = r.stdout.toString().split('\n');
+      const commonFormat = text.map(line => {
+        const m = line.match(re);
+        if (m) {
+          return `${m[1]} ${m[3]} ${m[2] === '-' ? 'f' : m[2]}`;
+        } else {
+          return line;
+        }
+      });
+      return commonFormat;
+    })
+}
+
+
+async function getExpectedValuesUx(rootdir, duOutput, findOutput) {
 
   return execCommandLine(`du -ab --exclude=node_modules ${rootdir}`)
     .then(r => {
