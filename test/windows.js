@@ -18,10 +18,14 @@ const isWindows = os.type() === 'Windows_NT';
 const testdir = '.';
 let testdirStat;
 const duOutput = {
-  wo_node: {},
   w_node: {},
+  wo_node: {},
+  w_nodePaths: [],
+  wo_nodePaths: [],
 }
 const findOutput = {
+  files: {},
+  directories: {},
   links: new Map(),
 }
 
@@ -32,7 +36,7 @@ const findOutput = {
 describe('verify that action-walk works as expected', function() {
   // using find to collect all the file and directory sizes is a little
   // bit slow, so give it a minute.
-  this.timeout(60000);
+  this.timeout() < 60_000 && this.timeout(60_000);
 
   // tests need to account for du counting the target directory itself
   // while walk treats that as a starting point and only counts the
@@ -47,6 +51,9 @@ describe('verify that action-walk works as expected', function() {
   })
 
   before(async function getTargetLinks() {
+    if (isWindows) {
+      return;
+    }
     return execCommandLine(`find ${testdir} -type l -exec readlink -nf {} ';' -exec echo " -> "{} ';'`)
       // get object {link: target, ...}
       .then(r => parseLinkArrowTarget(r.stdout))
@@ -142,7 +149,10 @@ describe('verify that action-walk works as expected', function() {
         // the delta difference between the link size and the target
         // size and corrects the total at the end.
         const target = await fsp.readlink(path);
-        const key = `${path} => ${p.resolve(p.dirname(path), target)}`;
+        // windows
+        const key = `${p.resolve(path)} => ${p.resolve(p.dirname(path), target)}`;
+        // linux
+        //const key = `${path} => ${p.resolve(p.dirname(path), target)}`;
         const sizes = findOutput.links.get(key);
         delta += sizes.target - sizes.link;
 
@@ -174,7 +184,14 @@ describe('verify that action-walk works as expected', function() {
       .then(() => {
         const awTotal = options.own.total;
         const duTotal = duOutput.w_node[testdir] - testdirStat.size;
-        expect(awTotal - duTotal).equal(0, 'du and action-walk should calculate the same total bytes');
+        // lstat returns the link size, 17 on windows, while gci objects return
+        // a length of 17.
+        if (isWindows) {
+          const linkBytes = findOutput.links.size * 17;
+          expect(awTotal - duTotal - linkBytes).equal(0, 'du and action-walk should calculate the same total bytes');
+        } else {
+          expect(awTotal - duTotal).equal(0, 'du and action-walk should calculate the same total bytes');
+        }
       })
   });
 
@@ -196,7 +213,12 @@ describe('verify that action-walk works as expected', function() {
       .then(() => {
         const awTotal = options.own.total;
         const duTotal = duOutput.wo_node[testdir] - testdirStat.size;
-        expect(awTotal).equal(duTotal, 'action-walk should calculate the same total bytes as du');
+        if (isWindows) {
+          const linkBytes = findOutput.links.size * 17;
+          expect(awTotal - linkBytes).equal(duTotal, 'du and action-walk should calculate the same total bytes');
+        } else {
+          expect(awTotal).equal(duTotal, 'action-walk should calculate the same total bytes as du');
+        }
       })
   });
 
@@ -205,6 +227,7 @@ describe('verify that action-walk works as expected', function() {
     const options = {
       dirAction: daDirsOnly,
       fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      linkAction: (path, ctx) => undefined,
       own,
       stat: 'lstat',
     };
@@ -213,7 +236,9 @@ describe('verify that action-walk works as expected', function() {
       .then(() => {
         expect(own.total + testdirStat.size).equal(duOutput.w_node[testdir]);
         for (const dir in own.dirTotals) {
-          expect(own.dirTotals[dir]).equal(duOutput.w_node[dir]);
+          const walkTotal = own.dirTotals[dir];
+          const duTotal = duOutput.w_node[dir];
+          expect(walkTotal).equal(duTotal, `action-walk and du mismatch for ${dir}`);
         }
       });
   });
@@ -223,6 +248,7 @@ describe('verify that action-walk works as expected', function() {
     const options = {
       dirAction: daDirsOnly,
       fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+      linkAction: (path, ctx) => undefined,
       own,
       stat: 'lstat',
     };
@@ -231,7 +257,9 @@ describe('verify that action-walk works as expected', function() {
       .then(() => {
         expect(own.total + testdirStat.size).equal(duOutput.wo_node[testdir]);
         for (const dir in own.dirTotals) {
-          expect(own.dirTotals[dir]).equal(duOutput.wo_node[`${dir}`]);
+          const walkTotal = own.dirTotals[dir];
+          const duTotal = duOutput.wo_node[dir];
+          expect(walkTotal).equal(duTotal, `action-walk and du mismatch for ${dir}`);
         }
       });
   });
@@ -253,6 +281,7 @@ async function daDirsOnly(path, ctx) {
   const options = {
     dirAction: daDirsOnly,
     fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+    linkAction: (path, ctx) => undefined,
     own: newown,
     stat: 'lstat',
   };
@@ -299,13 +328,11 @@ async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot 
   let lines1 = results.stdout.toString();
   let lines2 = lines1.split('\n');
 
-  const re = new RegExp('^(\\d+) ' + rootDirResolved.replace(/\\/g, '\\\\') + '(.+) (d|f)$');
+  const re = new RegExp('^(\\d+) ' + rootDirResolved.replace(/\\/g, '\\\\') + '(.+) (d|f|l)$');
   let count = 0;
 
-  const wo_nodePaths = [];
-  const w_nodePaths = [];
-  const directories = {};
-  const files = {};
+  const {w_nodePaths, wo_nodePaths} = duOutput;
+  const {directories, files} = findOutput;
   dirtreeRoot[rootdir] = {[BYTES]: 0, [TYPE]: 'd'};
 
   let wo_total = 0;
@@ -365,7 +392,21 @@ async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot 
       } else if (m[3] === 'f') {
         files[relativePath] = bytes;
       } else if (m[3] === 'l') {
-        // it's a link...
+        // windows gci info reports 0 length for links; node lstat.size
+        // reports 17.
+        let link = 0;
+        if (!isWindows) {
+          link = await (await fsp.lstat(relativePath)).size;
+        }
+        const targetFile = await fsp.readlink(relativePath);
+        // this is windows specific; linux find returns relative to the CWD
+        // while windows returns relative to the link.
+        const targetPath = p.resolve(p.dirname(relativePath), targetFile);
+
+        const target = await (await fsp.stat(targetPath)).size;
+        findOutput.links.set(`${fullpath} => ${targetPath}`, { link, target });
+      } else {
+        console.log('unexpected item type', m[3]);
       }
     } else {
       // don't know how to suppress ps noise. have changed login script and it
@@ -407,9 +448,6 @@ async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot 
       duOutput.wo_node[info.path] = info.bytes;
     }
   });
-
-  findOutput.directories = directories;
-  findOutput.files = files;
 
   return dirtreeRoot;
 }
@@ -454,6 +492,8 @@ async function getExpectedValuesWin(rootdir, duOutput, findOutput) {
 
       if (m[3] === 'd') {
         directories[fullpath] = +m[1];
+      } else if (m[3] === 'l') {
+        links[fullpath] = +m[1];
       } else {
         files[fullpath] = +m[1];
       }
