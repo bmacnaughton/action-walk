@@ -4,11 +4,17 @@ Get-ChildItem $args[0] -Recurse -force  | ForEach-Object {
     # Do something with the file size. cleverly, $_.length for
     # a directory is always 1 - not a real size, not zero (even
     # though it's zero). powershell is awesome.
-    if ($_.psiscontainer) {
-      Write-Host "0 $($_.FullName) d"
+    $mode = $_.mode
+    $length = $_.length
+    if ($mode[0] -eq "d") {
+      $mode = "d"
+      $length = 0
+    } elseif ($mode[-1] -eq "l") {
+      $mode = "l"
     } else {
-      Write-Host "$($_.length) $($_.fullname) f"
+      $mode = "f"
     }
+    write-host "$length $($_.fullname) $mode"
 }
 
 
