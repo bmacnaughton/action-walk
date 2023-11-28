@@ -5,8 +5,7 @@
 Minimal utility to walk directory trees performing actions on each directory
 entry. `action-walk` has no external production dependencies and has only one
 strong opinion - don't presume anything about why the directory tree is being
-walked. Oh, and another strong opinion - not supporting node versions prior to
-v12.12.0.
+walked.
 
 No presumptions means that this does little more than walk the tree. There
 are two options to facilitate implementing your code on top of `action-walk`.
@@ -16,6 +15,10 @@ present `action-walk` will pass that to the action functions in a context
 object.
 
 ### usage
+
+`action-walk` should run on any version of node that supports the `node:` prefix
+when requiring built-in modules. It is tested on even-numbered versions of node
+starting with 14 on both Linux and Windows.
 
 `npm install action-walk`
 
@@ -101,4 +104,3 @@ asynchronous work but only the value of `dirAction` is meaningful.
 ### todo
 
 - add error handling
-- add windows support
