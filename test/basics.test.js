@@ -441,13 +441,13 @@ async function getExpectedValues(rootdir, common, options = {}) {
 
         // if this is the first time we've seen nextElement, add it to
         // the previous element. otherwise just add to the byte count.
-        if (!(nextElement in treeStack.at(-1))) {
+        if (!(nextElement in treeStack[treeStack.length - 1])) {
           const newItem = { [BYTES]: bytes, [TYPE]: type };
-          treeStack.at(-1)[nextElement] = newItem;
+          treeStack[treeStack.length - 1][nextElement] = newItem;
           treeStack.push(newItem);
         } else {
-          treeStack.at(-1)[nextElement][BYTES] += bytes;
-          treeStack.push(treeStack.at(-1)[nextElement]);
+          treeStack[treeStack.length - 1][nextElement][BYTES] += bytes;
+          treeStack.push(treeStack[treeStack.length - 1][nextElement]);
         }
       }
     }
