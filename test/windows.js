@@ -17,26 +17,14 @@ const isWindows = os.type() === 'Windows_NT';
 // calculate expected results using stat, du, and find.
 const testdir = '.';
 let testdirStat;
-const duOutput = {
-  w_node: {},
-  wo_node: {},
-  w_nodePaths: [],
-  wo_nodePaths: [],
-}
-const findOutput = {
-  files: {},
-  directories: {},
-  links: new Map(),
-}
 
 describe('verify that action-walk works as expected', function() {
-  let allPaths;
-  let allTotalBytes;
   let directories;
   let files;
   let links;
   let others;
   let coreInfo;
+  let exclusionsInfo;
   let cumulativeDirs = {};
 
   // using find to collect all the file and directory sizes is a little
@@ -53,16 +41,15 @@ describe('verify that action-walk works as expected', function() {
         testdirStat = s;
       })
       .then(() => getCommonFormat(testdir))
-      .then(common => getExpectedValues(testdir, common))
+      .then(common => getExpectedValues(testdir, common, {exclusions: ['node_modules']}))
       .then(expected => {
         ({
-          allPaths,
-          allTotalBytes,
           directories,
           files,
           links,
           others,
           coreInfo,
+          exclusionsInfo,
         } = expected);
       })
       .then(() => {
@@ -220,17 +207,14 @@ describe('verify that action-walk works as expected', function() {
     let cumulativeDirs = {};
 
     before(function() {
-      for (const item of coreInfo) {
-        const {path, bytes, type} = item;
-        const pathElements = path.split(p.sep);
-        if (pathElements.includes('node_modules')) {
-          continue;
+      for (const item of exclusionsInfo['node_modules']) {
+        if (item.type === 'd') {
+          cumulativeDirs[item.path] = item.bytes;
         }
-        cumulativeDirs[path] = bytes;
       }
     });
 
-    it('should match du -ab --exclude=node_modules', function() {
+    it('should match calculated', function() {
       const options = {
         dirAction: (path, { dirent, stat, own }) => {
           if (own.skipDirs && own.skipDirs.indexOf(dirent.name) >= 0) {
@@ -247,13 +231,17 @@ describe('verify that action-walk works as expected', function() {
       return walk(testdir, options)
         .then(() => {
           const awTotal = options.own.total;
-          const cumulative = cumulativeDirs[testdir];
-          console.log('awTotal', awTotal, cumulative);
+          // TODO BAM
+          // always have to adjust for not counting the target directory.
+          // probably should change this.
+          const cumulative = cumulativeDirs[testdir] - testdirStat.size;
+          const delta = awTotal - cumulative;
+          expect(awTotal).equal(cumulative, `action-walk and calculated mismatch ${delta}`);
         })
     });
 
-    it.skip('should execute recursively matching du -b --exclude=node_modules', function() {
-      const own = { total: 0, linkCount: 0, dirTotals: {}, skipDirs: ['node_modules'] };
+    it('should match calculated when executing recursively', function() {
+      const own = { total: 0, dirTotals: {}, skipDirs: ['node_modules'] };
       const options = {
         dirAction: daDirsOnly,
         fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
@@ -264,18 +252,15 @@ describe('verify that action-walk works as expected', function() {
 
       return walk(testdir, options)
         .then(() => {
-          expect(own.total + testdirStat.size).equal(duOutput.wo_node[testdir]);
+          expect(own.total + testdirStat.size).equal(cumulativeDirs[testdir]);
           for (const dir in own.dirTotals) {
             const walkTotal = own.dirTotals[dir];
-            const duTotal = duOutput.wo_node[dir];
-            expect(walkTotal).equal(duTotal, `action-walk and du mismatch for ${dir}`);
+            const expected = cumulativeDirs[dir];
+            expect(walkTotal).equal(expected, `action-walk and calculated mismatch for ${dir}`);
           }
         });
     });
   })
-
-
-
 });
 
 
@@ -392,21 +377,15 @@ async function getExpectedValues(rootdir, common, options = {}) {
   const files = {};
   const links = {};
   const others = {};
-  const dirtreeRoot = {[BYTES]: 0, [TYPE]: 'd'};
-
-  let allPaths = [];
-  let allTotalBytes = 0;
-
-  // duOutput has totals for each directory
-  // findOutput is just a list of files/directories and their size
 
   const {exclusions = []} = options;
+
   // the default exclusion group is "nothing is excluded". others can be
-  // added.
+  // added. this works because a path element must have a non-zero length.
   exclusions.unshift('');
-  const groups = new Map();
+  const exclusionTrees = new Map();
   for (const exclusion of exclusions) {
-    groups.set(exclusion, []);
+    exclusionTrees.set(exclusion, { dirtreeRoot: { [BYTES]: 0, [TYPE]: 'd' } });
   }
 
   // simulate approximately what 'du -ab' does.
@@ -442,109 +421,23 @@ async function getExpectedValues(rootdir, common, options = {}) {
       others[relativePath] = {type, bytes};
     }
 
-    // i don't think we need allPaths; it's the same data as common but just
-    // an array.
-    allPaths.push(relativePath);
-    allTotalBytes += bytes;
-
     const fullpath = p.resolve(relativePath);
 
     // the path elements as an array, e.g., ['node_modules', '@contrast', ...]
     const relativePathElements = relativePath.split(p.sep);
 
     // start at the root each iteration of the loop
-    let treeStack = [dirtreeRoot];
-
-    // aggregate counts for each item in the tree. each tree entry is
-    // an object containing all leaf items and sub-trees. it also keeps
-    // the byte count for all leaf and sub-tree items.
-    //
-    // add each element's size to the predecessor byte counts because all
-    // items in the path contain the element.
-    for (let i = 0; i < relativePathElements.length; i++) {
-      const nextElement = relativePathElements[i];
-
+    for (const exclusion of exclusions) {
+      const {dirtreeRoot} = exclusionTrees.get(exclusion);
       // if this is the first time we've seen nextElement, add it to
       // the previous element. otherwise just add to the byte count.
-      if (!(nextElement in treeStack.at(-1))) {
-        const newItem = { [BYTES]: bytes, [TYPE]: type };
-        treeStack.at(-1)[nextElement] = newItem;
-        treeStack.push(newItem);
-      } else {
-        treeStack.at(-1)[nextElement][BYTES] += bytes;
-        treeStack.push(treeStack.at(-1)[nextElement]);
-      }
-    }
-  }
-
-  function walktree(tree) {
-    const branch = [];
-    const results = [];
-
-    function _walktree(tree) {
-      for (const key of Object.keys(tree)) {
-        branch.push(key);
-        _walktree(tree[key], branch);
-        results.push({ path: branch.join(p.sep), bytes: tree[key][BYTES], type: tree[key][TYPE] });
-        //console.log(branch.join(p.sep), tree[key][BYTES])
-        branch.pop();
-      }
-    }
-    _walktree(tree);
-
-    return results;
-  }
-
-  const coreInfo = walktree(dirtreeRoot);
-
-  return {
-    allPaths,
-    allTotalBytes,
-    directories,
-    files,
-    links,
-    others,
-    coreInfo,
-  };
-}
-
-
-async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot = {}) {
-  const rootDirResolved = p.resolve(rootdir);
-
-  // the script outputs lines like: "4096 C:\Users\joe\test\testdir d", where the last
-  // character is 'd' for directory, 'f' for file, and 'l' for link.
-  let results = cp.spawnSync('.\\scripts\\file-sizes.ps1', [rootdir], {shell: 'powershell.exe'});
-
-  let lines1 = results.stdout.toString();
-  let lines2 = lines1.split('\n');
-
-  const re = new RegExp('^(\\d+) ' + rootDirResolved.replace(/\\/g, '\\\\') + '(.+) (d|f|l)$');
-
-  const {w_nodePaths, wo_nodePaths} = duOutput;
-  const {directories, files} = findOutput;
-  dirtreeRoot[rootdir] = {[BYTES]: 0, [TYPE]: 'd'};
-
-  let wo_total = 0;
-  let w_total = 0;
-
-
-  // simulate approximately what 'du -ab' does.
-  for (const line of lines2) {
-    const m = line.match(re);
-    if (m) {
-      const bytes = +m[1];
-
-      const fullpath = line.slice(m[1].length + 1, -(m[3].length + 1));
-      // make the start of our paths the rootdir.
-      const relativePath = fullpath.replace(rootDirResolved, rootdir);
-
-      // the path elements as an array, e.g., ['node_modules', '@contrast', ...]
-      const relativePathElements = relativePath.split(p.sep);
-
-      // start at the root each time
       let treeStack = [dirtreeRoot];
 
+      // don't add excluded elements. NOTE: the default exclusion, '', can't
+      // match any path element.
+      if (relativePathElements.includes(exclusion)) {
+        continue;
+      }
       // aggregate counts for each item in the tree. each tree entry is
       // an object containing all leaf items and sub-trees. it also keeps
       // the byte count for all leaf and sub-tree items.
@@ -557,7 +450,7 @@ async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot 
         // if this is the first time we've seen nextElement, add it to
         // the previous element. otherwise just add to the byte count.
         if (!(nextElement in treeStack.at(-1))) {
-          const newItem = {[BYTES]: bytes, [TYPE]: m[3]};
+          const newItem = { [BYTES]: bytes, [TYPE]: type };
           treeStack.at(-1)[nextElement] = newItem;
           treeStack.push(newItem);
         } else {
@@ -565,189 +458,44 @@ async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot 
           treeStack.push(treeStack.at(-1)[nextElement]);
         }
       }
-
-      w_nodePaths.push(relativePath);
-      w_total += bytes;
-
-      // needs a little work, but we're only skipping subdirectories and
-      // they start in the second element. ideally skips should be an
-      // array of array of strings.
-      if (!['node_modules'].includes(relativePathElements[1])) {
-        wo_nodePaths.push(relativePath);
-        wo_total += bytes;
-      }
-
-      if (m[3] === 'd') {
-        directories[relativePath] = bytes;
-      } else if (m[3] === 'f') {
-        files[relativePath] = bytes;
-      } else if (m[3] === 'l') {
-        // windows gci info reports 0 length for links; node lstat.size
-        // reports 17.
-        let link = 0;
-        if (!isWindows) {
-          link = await (await fsp.lstat(relativePath)).size;
-        }
-        const targetFile = await fsp.readlink(relativePath);
-        // this is windows specific; linux find returns relative to the CWD
-        // while windows returns relative to the link.
-        const targetPath = p.resolve(p.dirname(relativePath), targetFile);
-
-        const target = await (await fsp.stat(targetPath)).size;
-        findOutput.links.set(`${fullpath} => ${targetPath}`, { link, target });
-      } else {
-        console.log('unexpected item type', m[3]);
-      }
-    } else {
-      // don't know how to suppress ps noise. have changed login script and it
-      // is still running old one it seems.
-      //console.log('unexpected line', line);
     }
   }
 
-  function walktree(tree) {
-    const branch = [];
-    const results = [];
-
-    function _walktree(tree) {
-      for (const key of Object.keys(tree)) {
-        branch.push(key);
-        _walktree(tree[key], branch);
-        results.push({path: branch.join(p.sep), bytes: tree[key][BYTES], type: tree[key][TYPE]});
-        //console.log(branch.join(p.sep), tree[key][BYTES])
-        branch.pop();
-      }
-    }
-    _walktree(tree);
-
-    return results;
-  }
-
+  const { dirtreeRoot } = exclusionTrees.get('');
   const coreInfo = walktree(dirtreeRoot);
 
-  // now insert rootdir totals; the powershell command doesn't report on
-  // the rootdir itself.
-  duOutput.w_node[rootdir] = w_total;
-  duOutput.wo_node[rootdir] = wo_total;
-
-  // w_node gets all the values, wo_node only those that are in
-  // wo_nodesPath.
-  coreInfo.forEach(info => {
-    duOutput.w_node[info.path] = info.bytes;
-    if (wo_nodePaths.includes(info.path)) {
-      duOutput.wo_node[info.path] = info.bytes;
+  const exclusionsInfo = {};
+  for (const [key, {dirtreeRoot}] of exclusionTrees.entries()) {
+    if (key === '') {
+      continue;
     }
-  });
+    exclusionsInfo[key] = walktree(dirtreeRoot);
+  }
 
-  return dirtreeRoot;
+  return {
+    directories,
+    files,
+    links,
+    others,
+    coreInfo,
+    exclusionsInfo,
+  };
 }
 
-async function getExpectedValuesWin(rootdir, duOutput, findOutput) {
-  let results = cp.spawnSync('.\\scripts\\file-sizes.ps1', [rootdir], {shell: 'powershell.exe'});
+function walktree(tree) {
+  const branch = [];
+  const results = [];
 
-  let lines1 = results.stdout.toString();
-  let lines2 = lines1.split('\n');
-
-  const re = new RegExp('^(\\d+) ' + process.cwd().replace(/\\/g, '\\\\') + '(.+) (d|f)$');
-  let count = 0;
-
-  const wo_node = {};
-  const w_node = {};
-  const directories = {};
-  const files = {};
-
-  let wo_total = 0;
-  let w_total = 0;
-
-  // this doesn't really do what "du -ab" does, but the test only requires
-  // the right information for testdir.
-  for (const line of lines2) {
-    const m = line.match(re);
-    if (m) {
-      const bytes = m[1];
-      const path = m[2];
-      const isDir = m[3] === 'd';
-      const fullpath = line.slice(m[1].length, -m[3].length);
-
-      w_node[fullpath] = +m[1];
-      w_total += w_node[fullpath];
-      //w_node.push({size: +m[1], name: m[2], directory: m[3] === 'd'});
-
-      if (!m[2].startsWith('\\node_modules')) {
-        wo_node[fullpath] = +m[1];
-        wo_total += wo_node[fullpath];
-        //wo_node.push({size: +m[1], name: m[2], directory: m[3] === 'd'});
-      }
-
-
-      if (m[3] === 'd') {
-        directories[fullpath] = +m[1];
-      } else if (m[3] === 'l') {
-        links[fullpath] = +m[1];
-      } else {
-        files[fullpath] = +m[1];
-      }
-    } else {
-      // don't know how to suppress ps noise. have changed login script and it
-      // is still running old one it seems.
-      //console.log('unexpected line', line);
+  function _walktree(tree) {
+    for (const key of Object.keys(tree)) {
+      branch.push(key);
+      _walktree(tree[key], branch);
+      results.push({ path: branch.join(p.sep), bytes: tree[key][BYTES], type: tree[key][TYPE] });
+      //console.log(branch.join(p.sep), tree[key][BYTES])
+      branch.pop();
     }
   }
-  // now fake testdir
-  wo_node[testdir] = wo_total;
-  w_node[testdir] = w_total;
+  _walktree(tree);
 
-  duOutput.wo_node = wo_node;
-  duOutput.w_node = w_node;
-  findOutput.directories = directories;
-  findOutput.files = files;
-}
-
-async function getExpectedValuesUxX(rootdir, duOutput, findOutput, dirtreeRoot = {}) {
-  const re = new RegExp('^(\\d+) (.).{9} ' + '(.+)$');
-
-  // `find node_modules/.bin -exec stat --printf "%s %A" {} ';' -exec echo " "{} ';'`
-  // 4096 drwxr-xr-x test
-  // 6644 -rw-r--r-- test/index.test.js
-  // and we convert to "4096 test d" and "6644 test/index.test.js f" so common processing
-  // with results of the file-sizes.ps1 script.
-  return execCommandLine(`find ${rootdir} -exec stat --printf "%s %A" {} ';' -exec echo " "{} ';'`)
-    .then(r => {
-      expect(r).property('stderr', '');
-      const text = r.stdout.toString().split('\n');
-      const commonFormat = text.map(line => {
-        const m = line.match(re);
-        if (m) {
-          return `${m[1]} ${m[3]} ${m[2] === '-' ? 'f' : m[2]}`;
-        } else {
-          return line;
-        }
-      });
-      return commonFormat;
-    })
-}
-
-
-async function getExpectedValuesUx(rootdir, duOutput, findOutput) {
-
-  return execCommandLine(`du -ab --exclude=node_modules ${rootdir}`)
-    .then(r => {
-      expect(r).property('stderr', '');
-      duOutput.wo_node = parseSizeSpacePath(r.stdout);
-    })
-    .then(() => execCommandLine(`du -ab ${rootdir}`))
-    .then(r => {
-      expect(r).property('stderr', '');
-      duOutput.w_node = parseSizeSpacePath(r.stdout);
-    })
-    .then(() => execCommandLine(`find ${rootdir} -type d -exec stat --printf %s {} ';' -exec echo " "{} ';'`))
-    .then(r => {
-      expect(r).property('stderr', '');
-      findOutput.directories = parseSizeSpacePath(r.stdout);
-    })
-    .then(() => execCommandLine(`find ${rootdir} -type f -exec stat --printf %s {} ';' -exec echo " "{} ';'`))
-    .then(r => {
-      expect(r).property('stderr', '');
-      findOutput.files = parseSizeSpacePath(r.stdout);
-    });
+  return results;
 }
