@@ -1,6 +1,7 @@
 'use strict';
 
-const fsp = require('fs').promises;
+const fs = require('fs');
+const fsp = fs.promises;
 const p = require('path');
 const {sep} = p;
 const {execCommandLine} = require('./utilities/exec');
@@ -61,7 +62,6 @@ describe('verify that action-walk works as expected', function() {
       })
       .then(() => {
         expect(others).deep.equal({}, 'there should be only files, directories, and links');
-        console.log(links)
       })
   })
 
@@ -293,28 +293,6 @@ async function daDirsOnly(path, ctx) {
   return 'skip';
 }
 
-function parseSizeSpacePath(text) {
-  const o = {};
-  const re = /(?<size>\d+)\s+(?<path>.+)/g;
-  let m;
-  while ((m = re.exec(text))) {
-    o[m.groups.path] = +m.groups.size;
-  }
-
-  return o;
-}
-
-function parseLinkArrowTarget(text) {
-  const r = [];
-  const re = /(?<target>.+)\s+->\s+(?<link>.+)/g;
-  let m;
-  while (m = re.exec(text)) {
-    r.push({link: m.groups.link, target: m.groups.target})
-  }
-
-  return r;
-}
-
 const BYTES = Symbol('bytes');
 const TYPE = Symbol('type');
 
@@ -342,12 +320,16 @@ function getCommonFormatWin(rootdir) {
   for (const line of lines) {
     const m = line.match(re);
     if (m) {
-      const bytes = +m[1];
       let name = p.join(rootdir, m[2]);
       if (rootdir === '.' || rootdir.startsWith('.\\')) {
         name = '.\\' + name;
       }
       const type = m[3];
+      // windows reports 0 for the size of links
+      let bytes = +m[1];
+      if (type === 'l') {
+        bytes = fs.lstatSync(name).size;
+      }
       items.push({ name, type, bytes });
     }
   }
