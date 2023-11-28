@@ -66,7 +66,7 @@ describe('verify that action-walk works as expected', function() {
   })
 
   it('should work with no arguments other than a directory', async function() {
-    let dir = isWindows ? '\\log' : '/dev';
+    let dir = isWindows ? 'test' : '/dev';
     return walk(dir);
   });
 
