@@ -66,7 +66,7 @@ describe('verify that action-walk works as expected', function() {
   })
 
   it('should work with no arguments other than a directory', async function() {
-    let dir = isWindows ? '\\program files (x86)\\WindowsPowerShell' : '/dev';
+    let dir = isWindows ? '\\log' : '/dev';
     return walk(dir);
   });
 
