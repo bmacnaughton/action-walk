@@ -59,6 +59,10 @@ describe('verify that action-walk works as expected', function() {
           }
         }
       })
+      .then(() => {
+        expect(others).deep.equal({}, 'there should be only files, directories, and links');
+        console.log(links)
+      })
   })
 
   it('should work with no arguments other than a directory', async function() {
@@ -110,9 +114,8 @@ describe('verify that action-walk works as expected', function() {
   });
 
   it('should count the correct number of directories, files, and links', function() {
-    // unix "find" includes the argument directory; get-childitem does not. action-walk
-    // does not include the argument directory either.
-    let dirCount = isWindows ? 0 : 1; // the starting directory
+    // action-walk doesn't count the target directory itself, so add it.
+    let dirCount = 1;
     let fileCount = 0;
     let linkCount = 0;
     let otherCount = 0;
@@ -132,7 +135,7 @@ describe('verify that action-walk works as expected', function() {
       });
   });
 
-  it('du -ab totals should differ by targetsize - linksize using stat', function() {
+  it('calculated totals should differ by targetsize - linksize using stat', function() {
     let delta = 0;
     const options = {
       dirAction: (path, ctx) => ctx.own.total += ctx.stat.size,
@@ -327,16 +330,23 @@ function getCommonFormatWin(rootdir) {
   if (results.stderr.length > 0) {
     throw new Error('error fetching file sizes:' + results.stderr.toString());
   }
+  // normalize to windows path
+  if (rootdir.startsWith('./')) {
+    rootdir = '.\\' + rootdir.slice(2);
+  }
 
   // windows doesn't report the rootdir item itself, so add it here.
-  const items = [{ name: rootdir, type: 'd', size: 0 }];
+  const items = [{ name: rootdir, type: 'd', bytes: 0 }];
 
   const lines = results.stdout.toString().split('\n');
   for (const line of lines) {
     const m = line.match(re);
     if (m) {
       const bytes = +m[1];
-      const name = p.join(rootdir, m[2]);
+      let name = p.join(rootdir, m[2]);
+      if (rootdir === '.' || rootdir.startsWith('.\\')) {
+        name = '.\\' + name;
+      }
       const type = m[3];
       items.push({ name, type, bytes });
     }
