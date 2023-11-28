@@ -29,11 +29,16 @@ const findOutput = {
   links: new Map(),
 }
 
-
-
-// child_process.execSync('.\\scripts\\file-sizes.ps1', {shell: 'powershell.exe'})
-
 describe('verify that action-walk works as expected', function() {
+  let allPaths;
+  let allTotalBytes;
+  let directories;
+  let files;
+  let links;
+  let others;
+  let coreInfo;
+  let cumulativeDirs = {};
+
   // using find to collect all the file and directory sizes is a little
   // bit slow, so give it a minute.
   this.timeout() < 60_000 && this.timeout(60_000);
@@ -42,29 +47,32 @@ describe('verify that action-walk works as expected', function() {
   // while walk treats that as a starting point and only counts the
   // contents of the directory.
   before(async function getTestDirSize() {
-    let getExpectedValues = isWindows ? getExpectedValuesWinX : getExpectedValuesUx;
+    let getCommonFormat = isWindows ? getCommonFormatWin : getCommonFormatUx;
     return fsp.stat(testdir)
       .then(s => {
         testdirStat = s;
       })
-      .then(() => getExpectedValues(testdir, duOutput, findOutput));
-  })
-
-  before(async function getTargetLinks() {
-    if (isWindows) {
-      return;
-    }
-    return execCommandLine(`find ${testdir} -type l -exec readlink -nf {} ';' -exec echo " -> "{} ';'`)
-      // get object {link: target, ...}
-      .then(r => parseLinkArrowTarget(r.stdout))
-      .then(async r => {
-        for (const pair of r) {
-          const link = await (await fsp.lstat(pair.link)).size;
-          const target = await (await fsp.stat(pair.target)).size;
-          findOutput.links.set(`${pair.link} => ${pair.target}`, {link, target});
+      .then(() => getCommonFormat(testdir))
+      .then(common => getExpectedValues(testdir, common))
+      .then(expected => {
+        ({
+          allPaths,
+          allTotalBytes,
+          directories,
+          files,
+          links,
+          others,
+          coreInfo,
+        } = expected);
+      })
+      .then(() => {
+        for (const item of coreInfo) {
+          if (item.type === 'd') {
+            cumulativeDirs[item.path] = item.bytes;
+          }
         }
       })
-  });
+  })
 
   it('should work with no arguments other than a directory', async function() {
     let dir = isWindows ? '\\program files (x86)\\WindowsPowerShell' : '/dev';
@@ -127,12 +135,12 @@ describe('verify that action-walk works as expected', function() {
       linkAction: (path, ctx) => linkCount += 1,
       otherAction: (path, ctx) => otherCount += 1,
     }
-    const keyCount = prop => Object.keys(findOutput[prop]).length;
+    const keyCount = prop => Object.keys(prop).length;
     return walk(testdir, options)
       .then(() => {
-        expect(dirCount).equal(keyCount('directories'), 'directory counts must match');
-        expect(fileCount).equal(keyCount('files'), 'file counts must match');
-        expect(linkCount).equal(findOutput.links.size, 'link counts must match');
+        expect(dirCount).equal(keyCount(directories), 'directory counts must match');
+        expect(fileCount).equal(keyCount(files), 'file counts must match');
+        expect(linkCount).equal(keyCount(links), 'link counts must match');
         expect(otherCount).equal(0, 'there should not be other types of directory entries');
       });
   });
@@ -148,13 +156,8 @@ describe('verify that action-walk works as expected', function() {
         // a total because links are small. so this test accumulates
         // the delta difference between the link size and the target
         // size and corrects the total at the end.
-        const target = await fsp.readlink(path);
-        // windows
-        const key = `${p.resolve(path)} => ${p.resolve(p.dirname(path), target)}`;
-        // linux
-        //const key = `${path} => ${p.resolve(p.dirname(path), target)}`;
-        const sizes = findOutput.links.get(key);
-        delta += sizes.target - sizes.link;
+        const {target, linkSize, targetSize} = links[path];
+        delta += targetSize - linkSize;
 
         ctx.own.total += ctx.stat.size;
       },
@@ -166,9 +169,12 @@ describe('verify that action-walk works as expected', function() {
     return walk(testdir, options)
       .then(() => {
         const awTotal = options.own.total;
-        const duTotal = duOutput.w_node[testdir] - testdirStat.size;
-        expect(awTotal - duTotal - delta).equal(0, 'du and action-walk should calculate the same total bytes');
-      })
+
+        console.log(awTotal, delta, testdirStat.size, cumulativeDirs[testdir]);
+        const expected = cumulativeDirs[testdir] + delta - testdirStat.size;
+        const msg = 'adjusted total bytes should be the same';
+        expect(awTotal).equal(expected, msg);
+      });
   });
 
   it('should match du -ab output using lstat without a linkAction', function() {
@@ -183,15 +189,8 @@ describe('verify that action-walk works as expected', function() {
     return walk(testdir, options)
       .then(() => {
         const awTotal = options.own.total;
-        const duTotal = duOutput.w_node[testdir] - testdirStat.size;
-        // lstat returns the link size, 17 on windows, while gci objects return
-        // a length of 17.
-        if (isWindows) {
-          const linkBytes = findOutput.links.size * 17;
-          expect(awTotal - duTotal - linkBytes).equal(0, 'du and action-walk should calculate the same total bytes');
-        } else {
-          expect(awTotal - duTotal).equal(0, 'du and action-walk should calculate the same total bytes');
-        }
+        const expected = cumulativeDirs[testdir] - testdirStat.size;
+        expect(awTotal).equal(expected, 'action-walk should calculate the same total bytes');
       })
   });
 
@@ -318,6 +317,199 @@ function parseLinkArrowTarget(text) {
 const BYTES = Symbol('bytes');
 const TYPE = Symbol('type');
 
+function getCommonFormatWin(rootdir) {
+  const rootDirResolved = p.resolve(rootdir);
+
+  // regex to match what the powershell script outputs.
+  const re = new RegExp('^(\\d+) ' + rootDirResolved.replace(/\\/g, '\\\\') + '(.+) (d|f|l)$');
+  // the script outputs lines like: "4096 C:\Users\joe\test\testdir d", where the last
+  // character is 'd' for directory, 'f' for file, and 'l' for link.
+  let results = cp.spawnSync('.\\scripts\\file-sizes.ps1', [rootdir], { shell: 'powershell.exe' });
+
+  if (results.stderr.length > 0) {
+    throw new Error('error fetching file sizes:' + results.stderr.toString());
+  }
+
+  // windows doesn't report the rootdir item itself, so add it here.
+  const items = [{ name: rootdir, type: 'd', size: 0 }];
+
+  const lines = results.stdout.toString().split('\n');
+  for (const line of lines) {
+    const m = line.match(re);
+    if (m) {
+      const bytes = +m[1];
+      const name = p.join(rootdir, m[2]);
+      const type = m[3];
+      items.push({ name, type, bytes });
+    }
+  }
+
+  return items;
+}
+
+function getCommonFormatUx(rootdir) {
+  const rootDirResolved = p.resolve(rootdir);
+
+  // regex to match the output of the following find command. It needs to be
+  // rearranged to match the common format.
+  const re = new RegExp('^(\\d+) (.).{9} ' + '(.+)$');
+
+  // `find node_modules/.bin -exec stat --printf "%s %A" {} ';' -exec echo " "{} ';'`
+  // 4096 drwxr-xr-x test
+  // 6644 -rw-r--r-- test/index.test.js
+  // and we convert to "4096 test d" and "6644 test/index.test.js f" so common processing
+  // with results of the file-sizes.ps1 script.
+  const r = cp.execSync(`find ${rootdir} -exec stat --format "%s %A %n" {} ';'`);
+  const lines = r.toString().split('\n');
+  const items = [];
+  for (const line of lines) {
+    const m = line.match(re);
+    if (m) {
+      const bytes = +m[1];
+      const type = m[2] === '-' ? 'f' : m[2];
+      const name = m[3];
+      items.push({ name, type, bytes });
+    }
+  }
+  return items;
+}
+
+async function getExpectedValues(rootdir, common, options = {}) {
+  const directories = {};
+  const files = {};
+  const links = {};
+  const others = {};
+  const dirtreeRoot = {[BYTES]: 0, [TYPE]: 'd'};
+
+  let allPaths = [];
+  let allTotalBytes = 0;
+
+  // duOutput has totals for each directory
+  // findOutput is just a list of files/directories and their size
+
+  const {exclusions = []} = options;
+
+  // simulate approximately what 'du -ab' does.
+  for (const item of common) {
+    const {name: relativePath, type, bytes} = item;
+
+    if (type === 'd') {
+      directories[relativePath] = bytes;
+    } else if (type === 'f') {
+      files[relativePath] = bytes;
+    } else if (type === 'l') {
+      // here we are adjusting for a significant windows vs. linux difference.
+      // - windows reports a size of 0 for links, neither the size of the link
+      // file nor the size of the target file.
+      // - linux ls reports the size of the link file for links, ls -l reports
+      // the size of the target file.
+      // - node lstat reports the size of the link file, stat reports the size
+      // of the target file.
+      //
+      // so we store both the link size and the target size for links. should
+      // we also adjust the raw data being returned by the getCommonFormat
+      // functions?
+      let linkSize = (await fsp.lstat(relativePath)).size;
+
+      // the link is relative to the linked file, not the CWD.
+      const target = await fsp.readlink(relativePath);
+      const targetPath = p.resolve(p.dirname(relativePath), target);
+      const targetSize = (await fsp.stat(targetPath)).size;
+
+      links[relativePath] = {target, linkSize, targetSize};
+    } else {
+      // this is an error, but let's record it so we know.
+      others[relativePath] = {type, bytes};
+    }
+
+    // i don't think we need allPaths; it's the same as common but a
+    // different format (not indexed by relativePath).
+    allPaths.push(relativePath);
+    allTotalBytes += bytes;
+
+    const fullpath = p.resolve(relativePath);
+
+    // the path elements as an array, e.g., ['node_modules', '@contrast', ...]
+    const relativePathElements = relativePath.split(p.sep);
+
+    // TODO
+    // add exclusions here by walking down the relativePathElements
+    // if (!['node_modules'].includes(relativePathElements[1])) {
+    //   wo_nodePaths.push(relativePath);
+    //   wo_total += bytes;
+    // }
+
+    // start at the root each iteration of the loop
+    let treeStack = [dirtreeRoot];
+
+    // aggregate counts for each item in the tree. each tree entry is
+    // an object containing all leaf items and sub-trees. it also keeps
+    // the byte count for all leaf and sub-tree items.
+    //
+    // add each element's size to the predecessor byte counts because all
+    // items in the path contain the element.
+    for (let i = 0; i < relativePathElements.length; i++) {
+      const nextElement = relativePathElements[i];
+
+      // if this is the first time we've seen nextElement, add it to
+      // the previous element. otherwise just add to the byte count.
+      if (!(nextElement in treeStack.at(-1))) {
+        const newItem = { [BYTES]: bytes, [TYPE]: type };
+        treeStack.at(-1)[nextElement] = newItem;
+        treeStack.push(newItem);
+      } else {
+        treeStack.at(-1)[nextElement][BYTES] += bytes;
+        treeStack.push(treeStack.at(-1)[nextElement]);
+      }
+    }
+  }
+
+  function walktree(tree) {
+    const branch = [];
+    const results = [];
+
+    function _walktree(tree) {
+      for (const key of Object.keys(tree)) {
+        branch.push(key);
+        _walktree(tree[key], branch);
+        results.push({ path: branch.join(p.sep), bytes: tree[key][BYTES], type: tree[key][TYPE] });
+        //console.log(branch.join(p.sep), tree[key][BYTES])
+        branch.pop();
+      }
+    }
+    _walktree(tree);
+
+    return results;
+  }
+
+  const coreInfo = walktree(dirtreeRoot);
+
+  //// now insert rootdir totals; the powershell command doesn't report on
+  //// the rootdir itself.
+  //duOutput.w_node[rootdir] = w_total;
+  //duOutput.wo_node[rootdir] = wo_total;
+  //
+  //// w_node gets all the values, wo_node only those that are in
+  //// wo_nodesPath.
+  //coreInfo.forEach(info => {
+  //  duOutput.w_node[info.path] = info.bytes;
+  //  if (wo_nodePaths.includes(info.path)) {
+  //    duOutput.wo_node[info.path] = info.bytes;
+  //  }
+  //});
+
+  return {
+    allPaths,
+    allTotalBytes,
+    directories,
+    files,
+    links,
+    others,
+    coreInfo,
+  };
+}
+
+
 async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot = {}) {
   const rootDirResolved = p.resolve(rootdir);
 
@@ -329,7 +521,6 @@ async function getExpectedValuesWinX(rootdir, duOutput, findOutput, dirtreeRoot 
   let lines2 = lines1.split('\n');
 
   const re = new RegExp('^(\\d+) ' + rootDirResolved.replace(/\\/g, '\\\\') + '(.+) (d|f|l)$');
-  let count = 0;
 
   const {w_nodePaths, wo_nodePaths} = duOutput;
   const {directories, files} = findOutput;
