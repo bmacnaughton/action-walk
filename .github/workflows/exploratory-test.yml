@@ -1,0 +1,22 @@
+name: 'exploratory-test'
+
+on:
+  push:
+    branches:
+      - test/**
+
+jobs:
+  basic-tests:
+    runs-on: macos-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Testing node v${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: stat -f "%z %p %N" *
