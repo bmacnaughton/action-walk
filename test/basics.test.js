@@ -354,7 +354,7 @@ function getCommonFormatUx(rootdir) {
   // 6644 -rw-r--r-- test/index.test.js
   // and we convert to "4096 test d" and "6644 test/index.test.js f" so common processing
   // with results of the file-sizes.ps1 script.
-  const r = cp.execSync(`find ${rootdir} -exec ${cmd} {} ';'`);
+  const r = cp.execSync(`find ${rootdir} -exec ${cmd} {} +`);
   const lines = r.toString().split('\n');
   const items = [];
   for (const line of lines) {
