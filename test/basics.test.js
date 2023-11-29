@@ -4,7 +4,6 @@ const fs = require('fs');
 const fsp = fs.promises;
 const p = require('path');
 const {sep} = p;
-const {execCommandLine} = require('./utilities/exec');
 const walk = require('../action-walk');
 const chai = require('chai');
 const expect = chai.expect;
@@ -298,17 +297,32 @@ const TYPE = Symbol('type');
 
 function getCommonFormatWin(rootdir) {
   const rootDirResolved = p.resolve(rootdir);
+  const cmd = `
+  Get-ChildItem "${rootdir}" -Recurse -force  | ForEach-Object {
+    # Do something with the file size. cleverly, $_.length for
+    # a directory is always 1 - not a real size, not zero (even
+    # though it's zero). powershell is awesome.
+    $mode = $_.mode
+    $length = $_.length
+    if ($mode[0] -eq "d") {
+      $mode = "d"
+      $length = 0
+    } elseif ($mode[-1] -eq "l") {
+      $mode = "l"
+    } else {
+      $mode = "f"
+    }
+    write-host "$length $($_.fullname) $mode"
+  }
+  `;
 
   // regex to match what the powershell script outputs.
   const re = new RegExp('^(\\d+) ' + rootDirResolved.replace(/\\/g, '\\\\') + '(.+) (d|f|l)$');
   // the script outputs lines like: "4096 C:\Users\joe\test\testdir d", where the last
   // character is 'd' for directory, 'f' for file, and 'l' for link.
-  let results = cp.spawnSync('.\\scripts\\file-sizes.ps1', [rootdir], { shell: 'powershell.exe' });
+  const result = cp.execSync(cmd, { shell: 'powershell.exe' });
 
-  if (results.stderr.length > 0) {
-    throw new Error('error fetching file sizes:' + results.stderr.toString());
-  }
-  // normalize to windows path
+  // normalize to native windows path
   if (rootdir.startsWith('./')) {
     rootdir = '.\\' + rootdir.slice(2);
   }
@@ -316,7 +330,7 @@ function getCommonFormatWin(rootdir) {
   // windows doesn't report the rootdir item itself, so add it here.
   const items = [{ name: rootdir, type: 'd', bytes: 0 }];
 
-  const lines = results.stdout.toString().split('\n');
+  const lines = result.toString().split('\n');
   for (const line of lines) {
     const m = line.match(re);
     if (m) {
