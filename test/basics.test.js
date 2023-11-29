@@ -66,7 +66,7 @@ describe('verify that action-walk works as expected', function() {
   })
 
   it('should work with no arguments other than a directory', async function() {
-    let dir = isWindows ? 'test' : '/dev';
+    let dir = 'test';
     return walk(dir);
   });
 
@@ -100,7 +100,7 @@ describe('verify that action-walk works as expected', function() {
 
   it('should work with non-file, non-directory, non-link file types', function() {
     // no device files on windows
-    if (isWindows) {
+    if (os.type() !== 'Linux') {
       this.skip();
     }
     const options = {
