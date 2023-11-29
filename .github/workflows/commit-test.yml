@@ -1,14 +1,39 @@
 name: 'commit-test'
 
-on: [push]
+on:
+  push:
+    branches-ignore:
+      - test/**
+  pull_request:
+    branches-ignore:
+      - test/**
 
 jobs:
-  basic-tests:
+  linux-test:
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
-        node-version: [12.x, 14.x, 16.x, 18.x, 20.x]
+        node-version: [14.x, 16.x, 18.x, 20.x]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Testing node v${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm install
+      - run: npm test
+
+  other-os-tests:
+    if: github.event_name == 'pull_request'
+    needs: linux-test
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x, 21.x]
+        os: [windows-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4

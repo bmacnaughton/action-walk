@@ -16,6 +16,7 @@
 
 const fsp = require('fs').promises;
 const path = require('path');
+const { sep } = path;
 
 async function walk (dir, options = {}) {
   const noop = async () => undefined;
@@ -24,7 +25,7 @@ async function walk (dir, options = {}) {
   let linkAction;
   let otherAction;
   let stat;
-  if (options.stat === 'stat' || options.stat === 'lstat') {
+  if (options.stat === 'lstat') {
     stat = options.stat;
   } else if (options.stat) {
     stat = 'stat';
@@ -52,8 +53,8 @@ async function walk (dir, options = {}) {
     for await (const dirent of await fsp.opendir(dir)) {
       let entry = path.join(dir, dirent.name);
       // path.join refuses to start a path with '.'
-      if (dir === '.' || dir.startsWith('./')) {
-        entry = './' + entry;
+      if (dir === '.' || dir.startsWith(`.${sep}`)) {
+        entry = `.${sep}${entry}`;
       }
       const ctx = {dirent, stack};
       if (options.own) {

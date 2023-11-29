@@ -11,32 +11,32 @@
 
 const fs = require('fs');
 const fsp = require('fs/promises');
+const { sep } = require('node:path');
 
 // replace with @bmacnaughton/action-walk to used in your own project.
 const walk = require('../action-walk.js');
 
 function dirAction(path, context) {
-  const { dirent, own } = context;
+  const { dirent, own, stack } = context;
 
   // we want to go into node_modules directories but only to find a
   // node_modules/.cache directory.
-  if (path.endsWith(`node_modules/${dirent.name}`)) {
-    // if it's not cache, skip it.
-    if (dirent.name !== '.cache') {
+  if (stack.at(-2) === 'node_modules') {
+    if (stack.at(-1) !== '.cache') {
       return 'skip';
     }
 
     // the directory is named .cache, so delete it if requested. (action-walk
-    // doesn't create a cache, but this is just an example.)
-    const cachePath = `${path}/@bmacnaughton/action-walk`;
+    // doesn't create a cache; this is just an example.)
+    const cachePath = `${path}${sep}@bmacnaughton${sep}action-walk`;
     if (!own.deleteCache) {
       console.log(`[DRY RUN: deleting ${cachePath}]`);
       return 'skip';
     }
     // it is node_modules/.cache, so asynchronously delete @contrast/rasp-v3
-    // recursively and return skip without waiting for the delete to finish.
-    // this allows action-walk to continue traversing the directory tree while
-    // the delete is in progress.
+    // recursively (ignoring ENOENT errors) and return skip without waiting
+    // for the delete to finish. this allows action-walk to continue traversing
+    // the directory tree while the delete is in progress.
     deleteDirectoryTree(cachePath);
 
     return 'skip';
@@ -98,7 +98,7 @@ const options = {
   }
 
   if (packageDotJson.name !== '@bmacnaughton/action-walk') {
-    console.log('? this script must be run from the mono-repo root');
+    console.log('? this script must be run from the repo root');
     process.exit(1);
   }
 
