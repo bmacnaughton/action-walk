@@ -25,7 +25,7 @@ async function walk (dir, options = {}) {
   let linkAction;
   let otherAction;
   let stat;
-  if (options.stat === 'stat' || options.stat === 'lstat') {
+  if (options.stat === 'lstat') {
     stat = options.stat;
   } else if (options.stat) {
     stat = 'stat';
