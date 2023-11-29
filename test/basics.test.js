@@ -344,12 +344,17 @@ function getCommonFormatUx(rootdir) {
   // rearranged to match the common format.
   const re = new RegExp('^(\\d+) (.).{9} ' + '(.+)$');
 
+  let cmd = 'stat --format "%s %A %n"';
+  if (os.type() === 'Darwin') {
+    cmd = 'stat -f "%z %Sp %SN"'
+  }
+
   // `find node_modules/.bin -exec stat --printf "%s %A" {} ';' -exec echo " "{} ';'`
   // 4096 drwxr-xr-x test
   // 6644 -rw-r--r-- test/index.test.js
   // and we convert to "4096 test d" and "6644 test/index.test.js f" so common processing
   // with results of the file-sizes.ps1 script.
-  const r = cp.execSync(`find ${rootdir} -exec stat --format "%s %A %n" {} ';'`);
+  const r = cp.execSync(`find ${rootdir} -exec ${cmd} {} ';'`);
   const lines = r.toString().split('\n');
   const items = [];
   for (const line of lines) {
