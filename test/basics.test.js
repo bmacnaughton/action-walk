@@ -64,16 +64,16 @@ describe('verify that action-walk works as expected', function() {
       })
   })
 
-  it('should work with no arguments other than a directory', async function() {
+  it('works with no arguments other than a directory', async function() {
     let dir = 'test';
     return walk(dir);
   });
 
-  it('should reject if the argument is not a directory', function() {
+  it('rejects if the argument is not a directory', function() {
     return expect(walk('./package.json')).eventually.rejected;
   })
 
-  it('the directory stack should be correct', function() {
+  it('the directory stack is correct', function() {
     // this test needs to change if files are added to or removed from
     // the test directory.
     const expected = {
@@ -97,8 +97,8 @@ describe('verify that action-walk works as expected', function() {
     return walk(`${testdir}/test`, options);
   });
 
-  it('should work with non-file, non-directory, non-link file types', function() {
-    // no device files on windows
+  it('works with non-file, non-directory, non-link file types', function() {
+    // no device files on windows (and get an error on macs)fremont
     if (os.type() !== 'Linux') {
       this.skip();
     }
@@ -112,7 +112,7 @@ describe('verify that action-walk works as expected', function() {
       });
   });
 
-  it('should count the correct number of directories, files, and links', function() {
+  it('counts the correct number of directories, files, and links', function() {
     // action-walk doesn't count the target directory itself, so add it.
     let dirCount = 1;
     let fileCount = 0;
@@ -134,75 +134,86 @@ describe('verify that action-walk works as expected', function() {
       });
   });
 
-  it('calculated totals should differ by targetsize - linksize using stat', function() {
-    let delta = 0;
-    const options = {
-      dirAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-      fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-      linkAction: async (path, ctx) => {
-        // because stat reports on the target of the link, not the
-        // link itself, this code will typically calculate too large
-        // a total because links are small. so this test accumulates
-        // the delta difference between the link size and the target
-        // size and corrects the total at the end.
-        const {target, linkSize, targetSize} = links[path];
-        delta += targetSize - linkSize;
+  [{ includeTopLevel: false }, { includeTopLevel: true }].forEach(({ includeTopLevel }) => {
+    const op = `(includeTopLevel: ${includeTopLevel})`;
 
-        ctx.own.total += ctx.stat.size;
-      },
-      otherAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-      own: {total: 0},
-      stat: true
-    };
+    it(`calculated totals differ by targetsize - linksize using stat ${op}`, function() {
+      let delta = 0;
+      const options = {
+        dirAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+        fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+        linkAction: async (path, ctx) => {
+          // because stat reports on the target of the link, not the
+          // link itself, this code will typically calculate too large
+          // a total because links are small. so this test accumulates
+          // the delta difference between the link size and the target
+          // size and corrects the total at the end.
+          const { target, linkSize, targetSize } = links[path];
+          delta += targetSize - linkSize;
 
-    return walk(testdir, options)
-      .then(() => {
-        const awTotal = options.own.total;
-        const expected = cumulativeDirs[testdir] + delta - testdirStat.size;
-        const msg = 'adjusted total bytes should be the same';
-        expect(awTotal).equal(expected, msg);
-      });
-  });
+          ctx.own.total += ctx.stat.size;
+        },
+        otherAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+        own: { total: 0 },
+        stat: true,
+        includeTopLevel,
+      };
 
-  // if no linkAction, links are handled by fileAction which sees the size of
-  // the link file when stat: lstat.
-  it('should match calculated totals without a linkAction', function() {
-    const options = {
-      dirAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-      fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-      otherAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-      own: {total: 0},
-      stat: 'lstat',
-    };
+      return walk(testdir, options)
+        .then(() => {
+          let testdirSize = includeTopLevel ? 0 : testdirStat.size;
+          const awTotal = options.own.total;
+          const expected = cumulativeDirs[testdir] + delta - testdirSize;
+          const msg = 'adjusted total bytes should be the same';
+          expect(awTotal).equal(expected, msg);
+        });
+    });
 
-    return walk(testdir, options)
-      .then(() => {
-        const awTotal = options.own.total;
-        const expected = cumulativeDirs[testdir] - testdirStat.size;
-        expect(awTotal).equal(expected, 'action-walk should calculate the same total bytes');
-      })
-  });
+    // if no linkAction, links are handled by fileAction which sees the size of
+    // the link file when stat: lstat.
+    it(`matches calculated totals without a linkAction ${op}`, function() {
+      const options = {
+        dirAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+        fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+        otherAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+        own: { total: 0 },
+        stat: 'lstat',
+        includeTopLevel,
+      };
 
-  it('should execute recursively matching calculated totals', function() {
-    const own = {total: 0, linkCount: 0, dirTotals: {}, skipDirs: []};
-    const options = {
-      dirAction: daDirsOnly,
-      fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-      linkAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-      own,
-      stat: 'lstat',
-    };
+      return walk(testdir, options)
+        .then(() => {
+          let testdirSize = includeTopLevel ? 0 : testdirStat.size;
+          const awTotal = options.own.total;
+          const expected = cumulativeDirs[testdir] - testdirSize;
+          expect(awTotal).equal(expected, 'action-walk should calculate the same total bytes');
+        })
+    });
 
-    return walk(testdir, options)
-      .then(() => {
-        expect(own.total + testdirStat.size).equal(cumulativeDirs[testdir]);
-        for (const dir in own.dirTotals) {
-          const walkTotal = own.dirTotals[dir];
-          const expected = cumulativeDirs[dir];
-          const diff = walkTotal - expected;
-          expect(walkTotal).equal(expected, `action-walk and calculated mismatch for ${dir}: ${diff}`);
-        }
-      });
+
+    it(`executes recursively matching calculated totals ${op}`, function() {
+      const own = { total: 0, linkCount: 0, dirTotals: {}, skipDirs: [] };
+      const options = {
+        dirAction: daDirsOnly,
+        fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+        linkAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+        own,
+        stat: 'lstat',
+        includeTopLevel,
+      };
+
+      return walk(testdir, options)
+        .then(() => {
+          let testdirSize = includeTopLevel ? 0 : testdirStat.size;
+          expect(own.total + testdirSize).equal(cumulativeDirs[testdir]);
+          for (const dir in own.dirTotals) {
+            const walkTotal = own.dirTotals[dir];
+            const expected = cumulativeDirs[dir];
+            const diff = walkTotal - expected;
+            expect(walkTotal).equal(expected, `action-walk and calculated mismatch for ${dir}: ${diff}`);
+          }
+        });
+    });
   });
 
   describe('handles node_modules exclusion', function() {
@@ -215,53 +226,61 @@ describe('verify that action-walk works as expected', function() {
         }
       }
     });
+    [{includeTopLevel: false}, {includeTopLevel: true}].forEach(({includeTopLevel}) => {
+      const op = `(includeTopLevel: ${includeTopLevel})`;
 
-    it('should match calculated', function() {
-      const options = {
-        dirAction: (path, { dirent, stat, own }) => {
-          if (own.skipDirs && own.skipDirs.indexOf(dirent.name) >= 0) {
-            return 'skip';
-          }
-          own.total += stat.size;
-        },
-        fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-        linkAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-        own: { total: 0, skipDirs: ['node_modules'] },
-        stat: 'lstat',
-      }
+      it(`matches calculated ${op}`, function() {
+        const options = {
+          dirAction: (path, { dirent, stat, own }) => {
+            if (own.skipDirs && own.skipDirs.indexOf(dirent.name) >= 0) {
+              return 'skip';
+            }
+            own.total += stat.size;
+          },
+          fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+          linkAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+          own: { total: 0, skipDirs: ['node_modules'] },
+          stat: 'lstat',
+          includeTopLevel,
+        }
 
-      return walk(testdir, options)
-        .then(() => {
-          const awTotal = options.own.total;
-          // TODO BAM
-          // always have to adjust for not counting the target directory.
-          // probably should change this.
-          const cumulative = cumulativeDirs[testdir] - testdirStat.size;
-          const delta = awTotal - cumulative;
-          expect(awTotal).equal(cumulative, `action-walk and calculated mismatch ${delta}`);
-        })
+        return walk(testdir, options)
+          .then(() => {
+            const awTotal = options.own.total;
+            // TODO BAM
+            // always have to adjust for not counting the target directory.
+            // probably should change this.
+            let testdirSize = includeTopLevel ? 0 : testdirStat.size;
+            const cumulative = cumulativeDirs[testdir] - testdirSize;
+            const delta = awTotal - cumulative;
+            expect(awTotal).equal(cumulative, `action-walk and calculated mismatch ${delta}`);
+          })
+      });
+
+      it(`matches calculated when executing recursively ${op}`, function() {
+        const own = { total: 0, dirTotals: {}, skipDirs: ['node_modules'] };
+        const options = {
+          dirAction: daDirsOnly,
+          fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+          linkAction: (path, ctx) => ctx.own.total += ctx.stat.size,
+          own,
+          stat: 'lstat',
+          includeTopLevel,
+        };
+
+        return walk(testdir, options)
+          .then(() => {
+            let testdirSize = includeTopLevel ? 0: testdirStat.size;
+            expect(own.total + testdirSize).equal(cumulativeDirs[testdir]);
+            for (const dir in own.dirTotals) {
+              const walkTotal = own.dirTotals[dir];
+              const expected = cumulativeDirs[dir];
+              expect(walkTotal).equal(expected, `action-walk and calculated mismatch for ${dir}`);
+            }
+          });
+      });
     });
 
-    it('should match calculated when executing recursively', function() {
-      const own = { total: 0, dirTotals: {}, skipDirs: ['node_modules'] };
-      const options = {
-        dirAction: daDirsOnly,
-        fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-        linkAction: (path, ctx) => ctx.own.total += ctx.stat.size,
-        own,
-        stat: 'lstat',
-      };
-
-      return walk(testdir, options)
-        .then(() => {
-          expect(own.total + testdirStat.size).equal(cumulativeDirs[testdir]);
-          for (const dir in own.dirTotals) {
-            const walkTotal = own.dirTotals[dir];
-            const expected = cumulativeDirs[dir];
-            expect(walkTotal).equal(expected, `action-walk and calculated mismatch for ${dir}`);
-          }
-        });
-    });
   })
 });
 
@@ -276,13 +295,14 @@ async function daDirsOnly(path, ctx) {
     return 'skip';
   }
   own.dirTotals[path] = 0;
-  const newown = {total: 0, dirTotals: own.dirTotals};
+  const newown = {total: 0, dirTotals: own.dirTotals, skipDirs: own.skipDirs};
   const options = {
     dirAction: daDirsOnly,
     fileAction: (path, ctx) => ctx.own.total += ctx.stat.size,
     linkAction: (path, ctx) => ctx.own.total += ctx.stat.size,
     own: newown,
     stat: 'lstat',
+
   };
   await walk(path, options);
   own.dirTotals[path] = newown.total + stat.size;
@@ -291,6 +311,11 @@ async function daDirsOnly(path, ctx) {
   // skip it because the recursive call counted the subtree.
   return 'skip';
 }
+
+
+// getCommonFormatWin and getCommonFormatUx each walk the directory tree
+// using native system commands (get-childitem and find), normalize the
+// results and returns them as an array of {name, type, bytes}.
 
 const BYTES = Symbol('bytes');
 const TYPE = Symbol('type');
@@ -383,6 +408,11 @@ function getCommonFormatUx(rootdir) {
   return items;
 }
 
+//
+// get expected values takes the common format and calculates the
+// expected values. this is approximately what 'du -ab' does: each
+// directory is reported as the sum of all items it contains.
+//
 async function getExpectedValues(rootdir, common, options = {}) {
   const directories = {};
   const files = {};
@@ -437,6 +467,8 @@ async function getExpectedValues(rootdir, common, options = {}) {
     // the path elements as an array, e.g., ['node_modules', '@contrast', ...]
     const relativePathElements = relativePath.split(p.sep);
 
+    // loop on each exclusions (the top-level directory is '', i.e., nothing
+    // is excluded). it just avoids special-casing the top-level directory.
     // start at the root each iteration of the loop
     for (const exclusion of exclusions) {
       const {dirtreeRoot} = exclusionTrees.get(exclusion);

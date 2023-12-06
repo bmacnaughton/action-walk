@@ -48,7 +48,7 @@ async function walk (dir, options = {}) {
   async function dispatchAction (dir, dirent) {
     let entry = path.join(dir, dirent.name);
     // path.join refuses to start a path with '.'
-    if (dir === '.' || dir.startsWith(`.${sep}`)) {
+    if ((dir === '.' && entry) || dir.startsWith(`.${sep}`)) {
       entry = `.${sep}${entry}`;
     }
     const ctx = { dirent, stack };
@@ -87,7 +87,25 @@ async function walk (dir, options = {}) {
     return undefined;
   }
 
-  return walker(dir);
+  // do first level dir here. we fake the top level dir as '' if it is '.'
+  // because the user didn't specify a full path and we don't want the
+  // resolved path to show up in the results.
+  if (options.includeTopLevel) {
+    let name = dir;
+    if (dir === '.') {
+      dir = '';
+    } else {
+      const p = path.parse(dir);
+      name = p.base;
+    }
+    const dirent = {
+      name,
+      isDirectory: () => true,
+    }
+    return dispatchAction(dir, dirent);
+  } else {
+    return walker(dir);
+  }
 }
 
 module.exports = walk;
