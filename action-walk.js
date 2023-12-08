@@ -45,45 +45,67 @@ async function walk (dir, options = {}) {
     otherAction = async (filepath, ctx) => options.otherAction(filepath, ctx);
   }
 
+  async function dispatchAction (dir, dirent) {
+    let entry = path.join(dir, dirent.name);
+    // path.join refuses to start a path with '.'
+    if ((dir === '.' && entry) || dir.startsWith(`.${sep}`)) {
+      entry = `.${sep}${entry}`;
+    }
+    const ctx = { dirent, stack };
+    if (options.own) {
+      ctx.own = options.own;
+    }
+    if (stat) {
+      ctx.stat = await fsp[stat](entry);
+    }
+    if (dirent.isDirectory()) {
+      if (await dirAction(entry, ctx) !== 'skip') {
+        await walker(entry);
+      }
+    } else if (dirent.isFile()) {
+      fileAction && await fileAction(entry, ctx);
+    } else if (dirent.isSymbolicLink()) {
+      if (linkAction) {
+        await linkAction(entry, ctx);
+      } else {
+        fileAction && await fileAction(entry, ctx);
+      }
+    } else {
+      otherAction && await otherAction(entry, ctx);
+    }
+  }
+
   //
   // walk through a directory tree calling user functions for each entry.
   //
   async function walker (dir) {
     stack.push(path.basename(dir));
     for await (const dirent of await fsp.opendir(dir)) {
-      let entry = path.join(dir, dirent.name);
-      // path.join refuses to start a path with '.'
-      if (dir === '.' || dir.startsWith(`.${sep}`)) {
-        entry = `.${sep}${entry}`;
-      }
-      const ctx = {dirent, stack};
-      if (options.own) {
-        ctx.own = options.own;
-      }
-      if (stat) {
-        ctx.stat = await fsp[stat](entry);
-      }
-      if (dirent.isDirectory()) {
-        if (await dirAction(entry, ctx) !== 'skip') {
-          await walker(entry);
-        }
-      } else if (dirent.isFile()) {
-        fileAction && await fileAction(entry, ctx);
-      } else if (dirent.isSymbolicLink()) {
-        if (linkAction) {
-          await linkAction(entry, ctx);
-        } else {
-          fileAction && await fileAction(entry, ctx);
-        }
-      } else {
-        otherAction && await otherAction(entry, ctx);
-      }
+      await dispatchAction(dir, dirent);
     }
     stack.pop();
     return undefined;
   }
 
-  return walker(dir);
+  // do first level dir here. we fake the top level dir as '' if it is '.'
+  // because the user didn't specify a full path and we don't want the
+  // resolved path to show up in the results.
+  if (options.includeTopLevel) {
+    let name = dir;
+    if (dir === '.') {
+      dir = '';
+    } else {
+      const p = path.parse(dir);
+      name = p.base;
+    }
+    const dirent = {
+      name,
+      isDirectory: () => true,
+    }
+    return dispatchAction(dir, dirent);
+  } else {
+    return walker(dir);
+  }
 }
 
 module.exports = walk;
